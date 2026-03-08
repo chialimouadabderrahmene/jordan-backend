@@ -19,7 +19,7 @@ const dbLogger = new Logger('DatabaseModule');
                     const parsed = new URL(databaseUrl);
                     const password = parsed.password;
                     const dbName = parsed.pathname.replace('/', '') || 'postgres';
-                    databaseUrl = `postgresql://postgres.hjojxhcuokbflvemztji:${password}@aws-0-eu-west-1.pooler.supabase.com:6543/${dbName}?pgbouncer=true&sslmode=require`;
+                    databaseUrl = `postgresql://postgres.hjojxhcuokbflvemztji:${password}@aws-0-eu-west-1.pooler.supabase.com:6543/${dbName}?pgbouncer=true`;
                     dbLogger.log(`Auto-rewritten DATABASE_URL to IPv4 pooler (aws-0-eu-west-1.pooler.supabase.com:6543)`);
                 }
 
@@ -29,7 +29,7 @@ const dbLogger = new Logger('DatabaseModule');
                     dbLogger.log(`Using DATABASE_URL (host: ${new URL(databaseUrl).hostname})`);
                     connectionConfig = { url: databaseUrl };
                 } else if (dbHost?.includes('.supabase.co')) {
-                    const poolerUrl = `postgresql://postgres.hjojxhcuokbflvemztji:${configService.get<string>('database.password')}@aws-0-eu-west-1.pooler.supabase.com:6543/${configService.get<string>('database.name')}?pgbouncer=true&sslmode=require`;
+                    const poolerUrl = `postgresql://postgres.hjojxhcuokbflvemztji:${configService.get<string>('database.password')}@aws-0-eu-west-1.pooler.supabase.com:6543/${configService.get<string>('database.name')}?pgbouncer=true`;
                     dbLogger.log(`Auto-rewriting DB_HOST to pooler (aws-0-eu-west-1.pooler.supabase.com:6543)`);
                     connectionConfig = { url: poolerUrl };
                 } else {
