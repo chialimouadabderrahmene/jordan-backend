@@ -34,7 +34,7 @@ const dbLogger = new Logger('DatabaseModule');
                     ...connectionConfig,
                     ssl: { rejectUnauthorized: false },
                     autoLoadEntities: true,
-                    synchronize: process.env.NODE_ENV !== 'production',
+                    synchronize: true,
                     logging: process.env.NODE_ENV === 'development',
                     entities: [__dirname + '/entities/**/*.entity{.ts,.js}'],
                     retryAttempts: 3,

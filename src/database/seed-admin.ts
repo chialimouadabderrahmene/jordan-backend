@@ -15,11 +15,11 @@ import { User, UserRole, UserStatus } from './entities/user.entity';
  *   DATABASE_URL  or  DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_NAME
  *
  * Default admin credentials (change password after first login):
- *   Email:    admin@wafaa.app
+ *   Email:    admin@methna.app
  *   Password: Admin@123456
  */
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@wafaa.app';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@methna.app';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Admin@123456';
 const ADMIN_FIRST_NAME = process.env.ADMIN_FIRST_NAME || 'Super';
 const ADMIN_LAST_NAME = process.env.ADMIN_LAST_NAME || 'Admin';
