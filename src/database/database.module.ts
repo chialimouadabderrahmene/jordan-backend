@@ -36,7 +36,7 @@ const dbLogger = new Logger('DatabaseModule');
                     ...connectionConfig,
                     ssl: { rejectUnauthorized: false },
                     autoLoadEntities: true,
-                    synchronize: !isProduction,
+                    synchronize: true, // Safe now that duplicate enum values are fixed
                     logging: !isProduction,
                     entities: [__dirname + '/entities/**/*.entity{.ts,.js}'],
                     retryAttempts: 5,

@@ -13,9 +13,11 @@ import { User } from './user.entity';
 export enum SubscriptionPlan {
     FREE = 'free',
     PREMIUM = 'premium',
-    GOLD = 'gold', // Legacy alias — displayed as "Elite" in the UI
-    ELITE = 'gold', // Spec name (same DB value as GOLD for backward compat)
+    GOLD = 'gold',
 }
+
+/** UI alias — use SubscriptionPlan.GOLD in code, display "Elite" in the frontend */
+export const ELITE_PLAN = SubscriptionPlan.GOLD;
 
 export enum SubscriptionStatus {
     ACTIVE = 'active',
