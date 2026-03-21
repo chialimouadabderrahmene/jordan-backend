@@ -8,10 +8,11 @@ export class MailService {
     private transporter: nodemailer.Transporter;
 
     constructor(private readonly configService: ConfigService) {
+        const port = this.configService.get<number>('mail.port') || 587;
         this.transporter = nodemailer.createTransport({
-            host: this.configService.get<string>('mail.host'),
-            port: this.configService.get<number>('mail.port'),
-            secure: false,
+            host: this.configService.get<string>('mail.host') || 'smtp.gmail.com',
+            port,
+            secure: port === 465,
             auth: {
                 user: this.configService.get<string>('mail.user'),
                 pass: this.configService.get<string>('mail.pass'),
@@ -23,9 +24,9 @@ export class MailService {
     async sendOtpEmail(to: string, otp: string, name: string): Promise<void> {
         try {
             await this.transporter.sendMail({
-                from: `"Wafaa App" <${this.configService.get<string>('mail.from')}>`,
+                from: `"Methna App" <${this.configService.get<string>('mail.from') || 'noreply@methna.app'}>`,
                 to,
-                subject: 'Wafaa - Email Verification Code',
+                subject: 'Methna - Email Verification Code',
                 html: `
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                         <h2 style="color: #2d7a4f;">Assalamu Alaikum ${name},</h2>
@@ -33,10 +34,10 @@ export class MailService {
                         <div style="background: #f4f4f4; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
                             <h1 style="color: #2d7a4f; letter-spacing: 8px; font-size: 36px; margin: 0;">${otp}</h1>
                         </div>
-                        <p>This code expires in <strong>30 seconds</strong>.</p>
+                        <p>This code expires in <strong>5 minutes</strong>.</p>
                         <p>If you did not request this code, please ignore this email.</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                        <p style="color: #999; font-size: 12px;">Wafaa - Halal Matchmaking Platform</p>
+                        <p style="color: #999; font-size: 12px;">Methna - Halal Matchmaking Platform</p>
                     </div>
                 `,
             });
@@ -50,9 +51,9 @@ export class MailService {
     async sendPasswordResetOtp(to: string, otp: string, name: string): Promise<void> {
         try {
             await this.transporter.sendMail({
-                from: `"Wafaa App" <${this.configService.get<string>('mail.from')}>`,
+                from: `"Methna App" <${this.configService.get<string>('mail.from') || 'noreply@methna.app'}>`,
                 to,
-                subject: 'Wafaa - Password Reset Code',
+                subject: 'Methna - Password Reset Code',
                 html: `
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                         <h2 style="color: #2d7a4f;">Assalamu Alaikum ${name},</h2>
@@ -60,10 +61,10 @@ export class MailService {
                         <div style="background: #f4f4f4; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
                             <h1 style="color: #c0392b; letter-spacing: 8px; font-size: 36px; margin: 0;">${otp}</h1>
                         </div>
-                        <p>This code expires in <strong>30 seconds</strong>.</p>
+                        <p>This code expires in <strong>5 minutes</strong>.</p>
                         <p>If you did not request this, please secure your account immediately.</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                        <p style="color: #999; font-size: 12px;">Wafaa - Halal Matchmaking Platform</p>
+                        <p style="color: #999; font-size: 12px;">Methna - Halal Matchmaking Platform</p>
                     </div>
                 `,
             });
