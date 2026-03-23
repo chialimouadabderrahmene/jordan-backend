@@ -69,7 +69,7 @@ export default function DailyInsightsPage() {
   const fetchInsights = async () => {
     setLoading(true)
     try {
-      const res = await adminApi.get('/daily-insights', { params: { page, limit } })
+      const res = await adminApi.getDailyInsights(page, limit)
       const data = res.data
       setInsights(data.items || [])
       setTotal(data.total || 0)
@@ -110,9 +110,9 @@ export default function DailyInsightsPage() {
         scheduledDate: formScheduledDate || undefined,
       }
       if (editingInsight) {
-        await adminApi.put(`/daily-insights/${editingInsight.id}`, body)
+        await adminApi.updateDailyInsight(editingInsight.id, body)
       } else {
-        await adminApi.post('/daily-insights', body)
+        await adminApi.createDailyInsight(body)
       }
       setDialogOpen(false)
       fetchInsights()
@@ -126,7 +126,7 @@ export default function DailyInsightsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this insight?')) return
     try {
-      await adminApi.delete(`/daily-insights/${id}`)
+      await adminApi.deleteDailyInsight(id)
       fetchInsights()
     } catch (err) {
       console.error('Failed to delete insight', err)
@@ -135,7 +135,7 @@ export default function DailyInsightsPage() {
 
   const handleToggleActive = async (insight: Insight) => {
     try {
-      await adminApi.put(`/daily-insights/${insight.id}`, { isActive: !insight.isActive })
+      await adminApi.updateDailyInsight(insight.id, { isActive: !insight.isActive })
       fetchInsights()
     } catch (err) {
       console.error('Failed to toggle insight', err)
@@ -145,7 +145,7 @@ export default function DailyInsightsPage() {
   const handleSeed = async () => {
     setSeeding(true)
     try {
-      await adminApi.post('/daily-insights/seed')
+      await adminApi.seedDailyInsights()
       fetchInsights()
     } catch (err) {
       console.error('Failed to seed insights', err)
