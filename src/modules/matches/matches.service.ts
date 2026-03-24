@@ -112,17 +112,15 @@ export class MatchesService {
         const latDelta = radiusKm / 111;
         const lngDelta = radiusKm / (111 * Math.cos(this.toRad(Number(profile.latitude))));
 
-        // Haversine formula in SQL for distance calculation
+        const distanceExpr = `(6371 * acos(LEAST(1.0, cos(radians(:lat)) * cos(radians(profile.latitude)) * cos(radians(profile.longitude) - radians(:lng)) + sin(radians(:lat)) * sin(radians(profile.latitude)))))`;
+
+        // Use WHERE instead of HAVING for the distance filter (no GROUP BY needed)
         const query = this.profileRepository
             .createQueryBuilder('profile')
             .leftJoinAndSelect('profile.user', 'user')
-            .addSelect(
-                `(6371 * acos(cos(radians(:lat)) * cos(radians(profile.latitude)) * cos(radians(profile.longitude) - radians(:lng)) + sin(radians(:lat)) * sin(radians(profile.latitude))))`,
-                'distance',
-            )
+            .addSelect(distanceExpr, 'distance')
             .where('profile.userId NOT IN (:...excludeIds)', { excludeIds })
             .andWhere('user.status = :status', { status: 'active' })
-            .andWhere('user.locationEnabled = :locEnabled', { locEnabled: true })
             .andWhere('profile.latitude IS NOT NULL')
             .andWhere('profile.longitude IS NOT NULL')
             // Bounding box filter (uses indexes, avoids full-table Haversine)
@@ -134,7 +132,8 @@ export class MatchesService {
                 minLng: Number(profile.longitude) - lngDelta,
                 maxLng: Number(profile.longitude) + lngDelta,
             })
-            .having('distance <= :radius', { radius: radiusKm })
+            // Distance filter inline (replaces invalid HAVING without GROUP BY)
+            .andWhere(`${distanceExpr} <= :radius`, { radius: radiusKm })
             .setParameters({ lat: profile.latitude, lng: profile.longitude })
             .orderBy('distance', 'ASC')
             .take(limit);
@@ -152,11 +151,15 @@ export class MatchesService {
         const cached = await this.redisService.getJson<any>(cacheKey);
         if (cached) return cached;
 
-        const [nearby, compatible, newUsers] = await Promise.all([
+        // Use allSettled so one failure doesn't crash the whole discovery
+        const results = await Promise.allSettled([
             this.getNearbyUsers(userId, 30, 10),
             this.getSuggestions(userId, 10),
             this.getNewUsers(userId, 10),
         ]);
+        const nearby = results[0].status === 'fulfilled' ? results[0].value : [];
+        const compatible = results[1].status === 'fulfilled' ? results[1].value : [];
+        const newUsers = results[2].status === 'fulfilled' ? results[2].value : [];
 
         // Merge all into a deduplicated flat 'users' array for the Flutter UsersController
         const seenIds = new Set<string>();
@@ -240,10 +243,10 @@ export class MatchesService {
             if (preferences.preferredMaritalStatus) {
                 query.andWhere('profile.maritalStatus = :maritalStatus', { maritalStatus: preferences.preferredMaritalStatus });
             }
-            // Distance filter
+            // Distance filter (LEAST prevents acos domain error from floating point)
             if (preferences.maxDistance && profile.latitude && profile.longitude) {
                 query.andWhere(
-                    `(6371 * acos(cos(radians(:lat)) * cos(radians(profile.latitude)) * cos(radians(profile.longitude) - radians(:lng)) + sin(radians(:lat)) * sin(radians(profile.latitude)))) <= :maxDist`,
+                    `(6371 * acos(LEAST(1.0, cos(radians(:lat)) * cos(radians(profile.latitude)) * cos(radians(profile.longitude) - radians(:lng)) + sin(radians(:lat)) * sin(radians(profile.latitude))))) <= :maxDist`,
                     { lat: profile.latitude, lng: profile.longitude, maxDist: preferences.maxDistance },
                 );
             }
@@ -294,24 +297,24 @@ export class MatchesService {
 
         return profiles.map((p) => ({
             id: p.userId,
-            username: p.user?.username || null,
-            email: p.user?.email || '',
-            firstName: p.user?.firstName || null,
-            lastName: p.user?.lastName || null,
-            phone: p.user?.phone || null,
-            role: p.user?.role || 'user',
-            status: p.user?.status || 'active',
-            emailVerified: p.user?.emailVerified || false,
-            selfieVerified: p.user?.selfieVerified || false,
-            isShadowBanned: p.user?.isShadowBanned || false,
-            trustScore: p.user?.trustScore || 100,
-            flagCount: p.user?.flagCount || 0,
-            deviceCount: p.user?.deviceCount || 0,
-            notificationsEnabled: p.user?.notificationsEnabled || true,
-            lastLoginAt: p.user?.lastLoginAt || null,
-            createdAt: p.user?.createdAt || new Date(),
-            updatedAt: p.user?.updatedAt || new Date(),
-            photos: photosMap.get(p.userId) || [],
+            username: p.user?.username ?? null,
+            email: p.user?.email ?? '',
+            firstName: p.user?.firstName ?? null,
+            lastName: p.user?.lastName ?? null,
+            phone: p.user?.phone ?? null,
+            role: p.user?.role ?? 'user',
+            status: p.user?.status ?? 'active',
+            emailVerified: p.user?.emailVerified ?? false,
+            selfieVerified: p.user?.selfieVerified ?? false,
+            isShadowBanned: p.user?.isShadowBanned ?? false,
+            trustScore: p.user?.trustScore ?? 100,
+            flagCount: p.user?.flagCount ?? 0,
+            deviceCount: p.user?.deviceCount ?? 0,
+            notificationsEnabled: p.user?.notificationsEnabled ?? true,
+            lastLoginAt: p.user?.lastLoginAt ?? null,
+            createdAt: p.user?.createdAt ?? new Date(),
+            updatedAt: p.user?.updatedAt ?? new Date(),
+            photos: photosMap.get(p.userId) ?? [],
             profile: {
                 id: p.id,
                 gender: p.gender,
@@ -335,9 +338,11 @@ export class MatchesService {
                 weight: p.weight,
                 interests: p.interests,
                 languages: p.languages,
-                profileCompletionPercentage: p.profileCompletionPercentage || 0,
-                activityScore: p.activityScore || 0,
-                isComplete: p.isComplete || false,
+                intentMode: p.intentMode ?? null,
+                secondWifePreference: p.secondWifePreference ?? null,
+                profileCompletionPercentage: p.profileCompletionPercentage ?? 0,
+                activityScore: p.activityScore ?? 0,
+                isComplete: p.isComplete ?? false,
             },
         }));
     }

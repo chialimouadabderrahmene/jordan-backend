@@ -6,6 +6,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserStatus } from '../../database/entities/user.entity';
+import { Profile } from '../../database/entities/profile.entity';
+import { Photo } from '../../database/entities/photo.entity';
 import { RedisService } from '../redis/redis.service';
 
 @Injectable()
@@ -13,6 +15,10 @@ export class UsersService {
     constructor(
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(Profile)
+        private readonly profileRepository: Repository<Profile>,
+        @InjectRepository(Photo)
+        private readonly photoRepository: Repository<Photo>,
         private readonly redisService: RedisService,
     ) { }
 
@@ -35,8 +41,23 @@ export class UsersService {
         return user;
     }
 
-    async getMe(userId: string): Promise<User> {
-        return this.findById(userId);
+    async getMe(userId: string) {
+        const user = await this.findById(userId);
+
+        // Load profile + photos so Flutter gets the full user object
+        const [profile, photos] = await Promise.all([
+            this.profileRepository.findOne({ where: { userId } }),
+            this.photoRepository.find({
+                where: { userId },
+                order: { isMain: 'DESC', order: 'ASC' },
+            }),
+        ]);
+
+        return {
+            ...user,
+            profile: profile || null,
+            photos: photos || [],
+        };
     }
 
     // Fields a user is allowed to modify on their own account
