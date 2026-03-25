@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
@@ -37,6 +38,9 @@ import configuration from './config/configuration';
 
         // Redis
         RedisModule,
+
+        // Mail (global)
+        MailModule,
 
         // Feature modules
         AuthModule,

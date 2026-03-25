@@ -6,11 +6,10 @@ import {
     HttpStatus,
     UseGuards,
     Logger,
-    InternalServerErrorException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, RefreshTokenDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, RefreshTokenDto, VerifyOtpDto, ResendOtpDto } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -53,6 +52,41 @@ export class AuthController {
             return result;
         } catch (error) {
             this.logger.error(`[REQUEST FAIL] POST /auth/login — ${error.message}`);
+            throw error;
+        }
+    }
+
+    @Public()
+    @Post('verify-otp')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Verify email with OTP code' })
+    @ApiResponse({ status: 200, description: 'Email verified' })
+    @ApiResponse({ status: 400, description: 'Invalid or expired OTP' })
+    async verifyOtp(@Body() dto: VerifyOtpDto) {
+        this.logger.log(`[REQUEST START] POST /auth/verify-otp — email=${dto.email}`);
+        try {
+            const result = await this.authService.verifyOtp(dto.email, dto.code);
+            this.logger.log('[REQUEST END] POST /auth/verify-otp — success');
+            return result;
+        } catch (error) {
+            this.logger.error(`[REQUEST FAIL] POST /auth/verify-otp — ${error.message}`);
+            throw error;
+        }
+    }
+
+    @Public()
+    @Post('resend-otp')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Resend OTP code' })
+    @ApiResponse({ status: 200, description: 'OTP resent' })
+    async resendOtp(@Body() dto: ResendOtpDto) {
+        this.logger.log(`[REQUEST START] POST /auth/resend-otp — email=${dto.email}`);
+        try {
+            const result = await this.authService.resendOtp(dto.email);
+            this.logger.log('[REQUEST END] POST /auth/resend-otp — success');
+            return result;
+        } catch (error) {
+            this.logger.error(`[REQUEST FAIL] POST /auth/resend-otp — ${error.message}`);
             throw error;
         }
     }

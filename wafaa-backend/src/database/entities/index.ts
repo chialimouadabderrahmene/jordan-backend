@@ -9,3 +9,4 @@ export * from './subscription.entity';
 export * from './report.entity';
 export * from './user-preference.entity';
 export * from './blocked-user.entity';
+export * from './otp-code.entity';

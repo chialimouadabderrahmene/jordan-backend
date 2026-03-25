@@ -13,6 +13,7 @@ import * as bcrypt from 'bcrypt';
 import { User, UserStatus } from '../../database/entities/user.entity';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { RedisService } from '../redis/redis.service';
+import { OtpService } from '../otp/otp.service';
 
 @Injectable()
 export class AuthService {
@@ -24,6 +25,7 @@ export class AuthService {
         private readonly jwtService: JwtService,
         private readonly configService: ConfigService,
         private readonly redisService: RedisService,
+        private readonly otpService: OtpService,
     ) { }
 
     async register(registerDto: RegisterDto) {
@@ -32,7 +34,7 @@ export class AuthService {
 
         try {
             // Check if user exists
-            this.logger.log('[REGISTER] Before DB findOne (check existing user)');
+            this.logger.log('[REGISTER] Before DB findOne');
             const existingUser = await this.userRepository.findOne({
                 where: { email },
             });
@@ -49,7 +51,7 @@ export class AuthService {
             this.logger.log('[REGISTER] After bcrypt hash');
 
             // Create user
-            this.logger.log('[REGISTER] Before DB save (create user)');
+            this.logger.log('[REGISTER] Before DB save');
             const user = this.userRepository.create({
                 email,
                 password: hashedPassword,
@@ -71,6 +73,12 @@ export class AuthService {
             await this.updateRefreshToken(user.id, tokens.refreshToken);
             this.logger.log('[REGISTER] After updateRefreshToken');
 
+            // Send OTP email (NON-BLOCKING — never throws)
+            this.logger.log('[REGISTER] Sending OTP email (non-blocking)');
+            this.otpService.generateAndSend(email).catch((err) => {
+                this.logger.error(`[REGISTER] OTP send failed (non-blocking): ${err.message}`);
+            });
+
             this.logger.log(`[REGISTER DONE] User registered: ${email}`);
 
             return {
@@ -79,7 +87,6 @@ export class AuthService {
             };
         } catch (error) {
             this.logger.error(`[REGISTER ERROR] ${error.message}`, error.stack);
-            // Re-throw known HTTP exceptions as-is
             if (error instanceof ConflictException) throw error;
             throw new InternalServerErrorException('Registration failed: ' + error.message);
         }
@@ -90,7 +97,6 @@ export class AuthService {
         this.logger.log(`[LOGIN START] email=${email}`);
 
         try {
-            // Find user with password
             this.logger.log('[LOGIN] Before DB findOne');
             const user = await this.userRepository.findOne({
                 where: { email },
@@ -147,6 +153,32 @@ export class AuthService {
         }
     }
 
+    async verifyOtp(email: string, code: string) {
+        this.logger.log(`[VERIFY OTP] email=${email}`);
+        await this.otpService.verify(email, code);
+
+        // Mark email as verified
+        await this.userRepository.update(
+            { email },
+            { emailVerified: true },
+        );
+        this.logger.log(`[VERIFY OTP] ✅ Email verified: ${email}`);
+
+        return { message: 'Email verified successfully' };
+    }
+
+    async resendOtp(email: string) {
+        this.logger.log(`[RESEND OTP] email=${email}`);
+
+        // Check that user exists
+        const user = await this.userRepository.findOne({ where: { email } });
+        if (!user) {
+            throw new UnauthorizedException('User not found');
+        }
+
+        return this.otpService.resend(email);
+    }
+
     async refreshTokens(refreshToken: string) {
         this.logger.log('[REFRESH] Start');
         try {
@@ -165,7 +197,6 @@ export class AuthService {
                 throw new UnauthorizedException('Invalid refresh token');
             }
 
-            // Verify stored refresh token matches
             const isRefreshValid = await bcrypt.compare(
                 refreshToken,
                 user.refreshToken,
@@ -174,7 +205,6 @@ export class AuthService {
                 throw new UnauthorizedException('Invalid refresh token');
             }
 
-            // Generate new tokens (rotation)
             const tokens = await this.generateTokens(user);
             await this.updateRefreshToken(user.id, tokens.refreshToken);
 

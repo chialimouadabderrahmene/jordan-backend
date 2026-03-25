@@ -33,4 +33,12 @@ export default () => ({
         ttl: parseInt(process.env.THROTTLE_TTL || '60', 10),
         limit: parseInt(process.env.THROTTLE_LIMIT || '100', 10),
     },
+
+    mail: {
+        host: process.env.MAIL_HOST || 'smtp.gmail.com',
+        port: parseInt(process.env.MAIL_PORT || '587', 10),
+        user: process.env.MAIL_USER || '',
+        pass: process.env.MAIL_PASS || '',
+        from: process.env.MAIL_FROM || process.env.MAIL_USER || '',
+    },
 });
