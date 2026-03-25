@@ -21,6 +21,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                 synchronize: process.env.NODE_ENV !== 'production',
                 logging: process.env.NODE_ENV === 'development',
                 entities: [__dirname + '/entities/**/*.entity{.ts,.js}'],
+                connectTimeoutMS: 10000,
+                extra: {
+                    statement_timeout: 30000,
+                    idle_in_transaction_session_timeout: 30000,
+                },
             }),
         }),
     ],

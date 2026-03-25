@@ -1,129 +1,88 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 
+/**
+ * No-op Redis service stub.
+ * All methods return immediately with sensible defaults.
+ * Redis is fully disabled — no network calls, no reconnect loops.
+ */
 @Injectable()
 export class RedisService implements OnModuleDestroy {
     private readonly logger = new Logger(RedisService.name);
-    private readonly baseUrl: string;
-    private readonly token: string;
 
-    constructor(private configService: ConfigService) {
-        this.baseUrl = this.configService.get<string>('redis.url') || '';
-        this.token = this.configService.get<string>('redis.token') || '';
-        this.logger.log('Redis service initialized (Upstash REST)');
+    constructor() {
+        this.logger.warn('Redis is DISABLED — using no-op stub (all calls return immediately)');
     }
 
     async onModuleDestroy() {
-        this.logger.log('Redis service destroyed');
+        // Nothing to clean up
     }
 
-    private async execute(command: string[]): Promise<any> {
-        try {
-            const response = await fetch(`${this.baseUrl}`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${this.token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(command),
-            });
-            const data = await response.json();
-            return data.result;
-        } catch (error) {
-            this.logger.error(`Redis command failed: ${command[0]}`, error);
-            return null;
-        }
+    async get(_key: string): Promise<string | null> {
+        return null;
     }
 
-    async get(key: string): Promise<string | null> {
-        return this.execute(['GET', key]);
+    async set(_key: string, _value: string, _ttlSeconds?: number): Promise<void> {
+        // no-op
     }
 
-    async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-        if (ttlSeconds) {
-            await this.execute(['SET', key, value, 'EX', ttlSeconds.toString()]);
-        } else {
-            await this.execute(['SET', key, value]);
-        }
+    async del(_key: string): Promise<void> {
+        // no-op
     }
 
-    async del(key: string): Promise<void> {
-        await this.execute(['DEL', key]);
+    async setJson(_key: string, _value: any, _ttlSeconds?: number): Promise<void> {
+        // no-op
     }
 
-    async setJson(key: string, value: any, ttlSeconds?: number): Promise<void> {
-        await this.set(key, JSON.stringify(value), ttlSeconds);
+    async getJson<T>(_key: string): Promise<T | null> {
+        return null;
     }
 
-    async getJson<T>(key: string): Promise<T | null> {
-        const value = await this.get(key);
-        if (!value) return null;
-        try {
-            return JSON.parse(value) as T;
-        } catch {
-            return null;
-        }
+    async exists(_key: string): Promise<boolean> {
+        return false;
     }
 
-    async exists(key: string): Promise<boolean> {
-        const result = await this.execute(['EXISTS', key]);
-        return result === 1;
+    async expire(_key: string, _ttlSeconds: number): Promise<void> {
+        // no-op
     }
 
-    async expire(key: string, ttlSeconds: number): Promise<void> {
-        await this.execute(['EXPIRE', key, ttlSeconds.toString()]);
+    async incr(_key: string): Promise<number> {
+        return 1;
     }
 
-    async incr(key: string): Promise<number> {
-        return this.execute(['INCR', key]);
+    async sadd(_key: string, ..._members: string[]): Promise<void> {
+        // no-op
     }
 
-    async sadd(key: string, ...members: string[]): Promise<void> {
-        await this.execute(['SADD', key, ...members]);
+    async srem(_key: string, ..._members: string[]): Promise<void> {
+        // no-op
     }
 
-    async srem(key: string, ...members: string[]): Promise<void> {
-        await this.execute(['SREM', key, ...members]);
+    async smembers(_key: string): Promise<string[]> {
+        return [];
     }
 
-    async smembers(key: string): Promise<string[]> {
-        return this.execute(['SMEMBERS', key]) || [];
+    async sismember(_key: string, _member: string): Promise<boolean> {
+        return false;
     }
 
-    async sismember(key: string, member: string): Promise<boolean> {
-        const result = await this.execute(['SISMEMBER', key, member]);
-        return result === 1;
-    }
+    // Online presence — no-op
+    async setUserOnline(_userId: string): Promise<void> { }
+    async setUserOffline(_userId: string): Promise<void> { }
 
-    // Online presence
-    async setUserOnline(userId: string): Promise<void> {
-        await this.sadd('online_users', userId);
-        await this.set(`user:${userId}:last_seen`, new Date().toISOString(), 300);
-    }
-
-    async setUserOffline(userId: string): Promise<void> {
-        await this.srem('online_users', userId);
-        await this.set(`user:${userId}:last_seen`, new Date().toISOString());
-    }
-
-    async isUserOnline(userId: string): Promise<boolean> {
-        return this.sismember('online_users', userId);
+    async isUserOnline(_userId: string): Promise<boolean> {
+        return false;
     }
 
     async getOnlineUsers(): Promise<string[]> {
-        return this.smembers('online_users');
+        return [];
     }
 
-    // Rate limiting
+    // Rate limiting — always allow
     async checkRateLimit(
-        key: string,
-        limit: number,
-        windowSeconds: number,
+        _key: string,
+        _limit: number,
+        _windowSeconds: number,
     ): Promise<boolean> {
-        const current = await this.incr(`ratelimit:${key}`);
-        if (current === 1) {
-            await this.expire(`ratelimit:${key}`, windowSeconds);
-        }
-        return current <= limit;
+        return true;
     }
 }

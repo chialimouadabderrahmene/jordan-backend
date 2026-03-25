@@ -5,8 +5,8 @@ import {
     CallHandler,
     Logger,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
+import { Observable, throwError, TimeoutError } from 'rxjs';
+import { tap, timeout, catchError } from 'rxjs/operators';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -18,10 +18,28 @@ export class LoggingInterceptor implements NestInterceptor {
         const url = request.url;
         const now = Date.now();
 
+        // Log request START immediately
+        this.logger.log(`➡️  [REQUEST START] ${method} ${url}`);
+
         return next.handle().pipe(
+            // 30-second timeout — if handler doesn't respond, force error
+            timeout(30000),
             tap(() => {
                 const responseTime = Date.now() - now;
-                this.logger.log(`${method} ${url} - ${responseTime}ms`);
+                this.logger.log(`✅ [REQUEST END] ${method} ${url} — ${responseTime}ms`);
+            }),
+            catchError((err) => {
+                const responseTime = Date.now() - now;
+                if (err instanceof TimeoutError) {
+                    this.logger.error(
+                        `⏰ [REQUEST TIMEOUT] ${method} ${url} — stuck for ${responseTime}ms, KILLED`,
+                    );
+                } else {
+                    this.logger.error(
+                        `❌ [REQUEST ERROR] ${method} ${url} — ${responseTime}ms — ${err.message}`,
+                    );
+                }
+                return throwError(() => err);
             }),
         );
     }
