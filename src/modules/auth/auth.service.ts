@@ -123,7 +123,20 @@ export class AuthService {
             otpAttempts: 0,
         });
 
-        await this.userRepository.save(user);
+        try {
+            await this.userRepository.save(user);
+        } catch (dbError) {
+            // Handle PostgreSQL unique constraint violation (code 23505)
+            if (dbError?.code === '23505' || dbError?.driverError?.code === '23505') {
+                const detail = dbError?.driverError?.detail || dbError?.detail || '';
+                this.logger.warn(`[OTP] Duplicate key violation: ${detail}`);
+                if (detail.includes('username')) {
+                    throw new ConflictException('Username already taken');
+                }
+                throw new ConflictException('Email already registered');
+            }
+            throw dbError;
+        }
         this.logger.log(`[OTP] User created & hashed OTP saved for ${email}, expiry=${otpExpiry.toISOString()}`);
 
         // Await email send so errors propagate
