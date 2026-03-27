@@ -2,16 +2,18 @@ import {
     Controller,
     Post,
     Get,
+    Patch,
     Delete,
     Param,
     Body,
+    Query,
     UseGuards,
     HttpCode,
     HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
-import { CreateReportDto } from './dto/report.dto';
+import { CreateReportDto, UpdateReportStatusDto } from './dto/report.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -23,7 +25,7 @@ export class ReportsController {
     constructor(private readonly reportsService: ReportsService) { }
 
     @Post()
-    @ApiOperation({ summary: 'Report a user' })
+    @ApiOperation({ summary: 'Submit a report or feedback' })
     async createReport(
         @CurrentUser('sub') userId: string,
         @Body() dto: CreateReportDto,
@@ -31,6 +33,37 @@ export class ReportsController {
         return this.reportsService.createReport(userId, dto);
     }
 
+    @Get('my-reports')
+    @ApiOperation({ summary: 'Get my submitted reports and feedback' })
+    async getMyReports(@CurrentUser('sub') userId: string) {
+        return this.reportsService.getMyReports(userId);
+    }
+
+    // ─── Admin ─────────────────────────────────────────────
+    @Get('admin/all')
+    @ApiOperation({ summary: 'Get all reports (admin)' })
+    @ApiQuery({ name: 'page', required: false })
+    @ApiQuery({ name: 'limit', required: false })
+    async getAllReports(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.reportsService.getAllReports(
+            parseInt(page || '1', 10),
+            parseInt(limit || '20', 10),
+        );
+    }
+
+    @Patch('admin/:id/status')
+    @ApiOperation({ summary: 'Update report status (admin)' })
+    async updateStatus(
+        @Param('id') id: string,
+        @Body() dto: UpdateReportStatusDto,
+    ) {
+        return this.reportsService.updateReportStatus(id, dto);
+    }
+
+    // ─── Blocking ──────────────────────────────────────────
     @Post('block/:id')
     @ApiOperation({ summary: 'Block a user' })
     async blockUser(

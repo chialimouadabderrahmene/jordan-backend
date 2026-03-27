@@ -16,6 +16,9 @@ export enum ReportReason {
     HARASSMENT = 'harassment',
     SPAM = 'spam',
     UNDERAGE = 'underage',
+    FEEDBACK = 'feedback',
+    BUG = 'bug',
+    SUGGESTION = 'suggestion',
     OTHER = 'other',
 }
 
@@ -40,10 +43,10 @@ export class Report {
     reporter: User;
 
     @Index()
-    @Column()
+    @Column({ nullable: true })
     reportedId: string;
 
-    @ManyToOne(() => User, { onDelete: 'CASCADE' })
+    @ManyToOne(() => User, { onDelete: 'CASCADE', nullable: true })
     @JoinColumn({ name: 'reportedId' })
     reported: User;
 

@@ -5,9 +5,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Report } from '../../database/entities/report.entity';
+import { Report, ReportReason } from '../../database/entities/report.entity';
 import { BlockedUser } from '../../database/entities/blocked-user.entity';
-import { CreateReportDto } from './dto/report.dto';
+import { CreateReportDto, UpdateReportStatusDto } from './dto/report.dto';
 import { RedisService } from '../redis/redis.service';
 
 @Injectable()
@@ -20,22 +20,34 @@ export class ReportsService {
         private readonly redisService: RedisService,
     ) { }
 
+    // ─── User Reports ──────────────────────────────────────
     async createReport(userId: string, dto: CreateReportDto): Promise<Report> {
-        if (userId === dto.reportedId) {
-            throw new BadRequestException('Cannot report yourself');
-        }
+        const isFeedback = [
+            ReportReason.FEEDBACK,
+            ReportReason.BUG,
+            ReportReason.SUGGESTION,
+        ].includes(dto.reason);
 
-        // Check for existing report
-        const existing = await this.reportRepository.findOne({
-            where: { reporterId: userId, reportedId: dto.reportedId, status: 'pending' as any },
-        });
-        if (existing) {
-            throw new BadRequestException('Report already pending for this user');
+        // For user reports, reportedId is required and can't be self
+        if (!isFeedback) {
+            if (!dto.reportedId) {
+                throw new BadRequestException('reportedId is required for user reports');
+            }
+            if (userId === dto.reportedId) {
+                throw new BadRequestException('Cannot report yourself');
+            }
+            // Check for existing pending report
+            const existing = await this.reportRepository.findOne({
+                where: { reporterId: userId, reportedId: dto.reportedId, status: 'pending' as any },
+            });
+            if (existing) {
+                throw new BadRequestException('Report already pending for this user');
+            }
         }
 
         const report = this.reportRepository.create({
             reporterId: userId,
-            reportedId: dto.reportedId,
+            reportedId: isFeedback ? undefined : dto.reportedId,
             reason: dto.reason,
             details: dto.details,
         });
@@ -43,6 +55,34 @@ export class ReportsService {
         return this.reportRepository.save(report);
     }
 
+    async getMyReports(userId: string) {
+        return this.reportRepository.find({
+            where: { reporterId: userId },
+            order: { createdAt: 'DESC' },
+            take: 50,
+        });
+    }
+
+    // ─── Admin ─────────────────────────────────────────────
+    async getAllReports(page: number = 1, limit: number = 20): Promise<{ data: Report[]; total: number }> {
+        const [data, total] = await this.reportRepository.findAndCount({
+            relations: ['reporter', 'reported'],
+            order: { createdAt: 'DESC' },
+            skip: (page - 1) * limit,
+            take: limit,
+        });
+        return { data, total };
+    }
+
+    async updateReportStatus(reportId: string, dto: UpdateReportStatusDto): Promise<Report> {
+        const report = await this.reportRepository.findOne({ where: { id: reportId } });
+        if (!report) throw new NotFoundException('Report not found');
+        report.status = dto.status;
+        if (dto.moderatorNote) report.moderatorNote = dto.moderatorNote;
+        return this.reportRepository.save(report);
+    }
+
+    // ─── Blocking ──────────────────────────────────────────
     async blockUser(userId: string, blockedId: string): Promise<void> {
         if (userId === blockedId) {
             throw new BadRequestException('Cannot block yourself');
@@ -61,7 +101,6 @@ export class ReportsService {
         });
         await this.blockedUserRepository.save(block);
 
-        // Invalidate blocked-user caches for both users (used by search)
         await Promise.all([
             this.redisService.del(`blocked_ids:${userId}`),
             this.redisService.del(`blocked_ids:${blockedId}`),
@@ -75,7 +114,6 @@ export class ReportsService {
         if (!block) throw new NotFoundException('User is not blocked');
         await this.blockedUserRepository.remove(block);
 
-        // Invalidate blocked-user caches for both users
         await Promise.all([
             this.redisService.del(`blocked_ids:${userId}`),
             this.redisService.del(`blocked_ids:${blockedId}`),
