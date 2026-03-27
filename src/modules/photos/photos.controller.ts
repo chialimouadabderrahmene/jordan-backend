@@ -5,6 +5,7 @@ import {
     Patch,
     Delete,
     Param,
+    Body,
     UseGuards,
     UseInterceptors,
     UploadedFile,
@@ -39,8 +40,10 @@ export class PhotosController {
     async uploadPhoto(
         @CurrentUser('sub') userId: string,
         @UploadedFile() file: Express.Multer.File,
+        @Body('isMain') isMain?: boolean | string,
     ) {
-        return this.photosService.uploadPhoto(userId, file);
+        const isMainBool = String(isMain) === 'true';
+        return this.photosService.uploadPhoto(userId, file, isMainBool);
     }
 
     @Get('me')

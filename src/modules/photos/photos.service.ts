@@ -26,6 +26,7 @@ export class PhotosService {
     async uploadPhoto(
         userId: string,
         file: Express.Multer.File,
+        isMainRequested: boolean = false,
     ): Promise<Photo> {
         // Validate file presence
         if (!file) {
@@ -56,8 +57,16 @@ export class PhotosService {
             // Upload to Cloudinary
             const result = await this.cloudinaryService.uploadImage(file);
 
-            // Determine if first photo (auto-set as main)
-            const isMain = photoCount === 0;
+            // Determine if this should be the main photo
+            let isMain = isMainRequested || photoCount === 0;
+
+            if (isMain && photoCount > 0) {
+                // Unset current main if we're setting a new one
+                await this.photoRepository.update(
+                    { userId, isMain: true },
+                    { isMain: false },
+                );
+            }
 
             // Save to DB
             const photo = this.photoRepository.create({
