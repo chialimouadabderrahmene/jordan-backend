@@ -19,3 +19,7 @@ export * from './email-blacklist.entity';
 export * from './boost.entity';
 export * from './category.entity';
 export * from './support-ticket.entity';
+export * from './app-content.entity';
+export * from './faq.entity';
+export * from './job-vacancy.entity';
+export * from './partner.entity';

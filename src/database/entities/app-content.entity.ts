@@ -12,6 +12,12 @@ export enum ContentType {
     PRIVACY = 'privacy',
     ABOUT = 'about',
     FAQ = 'faq',
+    PARTNERS = 'partners',
+    JOBS = 'jobs',
+    ACCESSIBILITY = 'accessibility',
+    COMMUNITY_GUIDELINES = 'community_guidelines',
+    SAFETY_TIPS = 'safety_tips',
+    CONTACT_US = 'contact_us',
 }
 
 @Entity('app_content')
