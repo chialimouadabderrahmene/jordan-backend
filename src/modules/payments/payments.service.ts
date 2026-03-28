@@ -145,16 +145,18 @@ export class PaymentsService {
             const invoice = subscription.latest_invoice as any;
             const paymentIntent = invoice?.payment_intent as any;
 
+            const ephemeralKey = await this.stripe.ephemeralKeys.create(
+                { customer: stripeCustomerId },
+                { apiVersion: '2023-10-16' as any }
+            );
+            
             this.logger.log(`Stripe subscription created for user ${userId}, plan: ${plan}`);
             return {
                 success: true,
                 paymentId: subscription.id,
                 clientSecret: paymentIntent?.client_secret || '',
                 customerId: stripeCustomerId,
-                ephemeralKey: (await this.stripe.ephemeralKeys.create(
-                    { customer: stripeCustomerId },
-                    { apiVersion: '2023-10-16' as any }
-                )).secret
+                ephemeralKey: ephemeralKey.secret,
             };
         } catch (error) {
             this.logger.error('Stripe subscription creation failed', (error as Error).message);
