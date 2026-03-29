@@ -100,10 +100,15 @@ export class AuthService {
 
         if (username) {
             const existingUsername = await this.userRepository.findOne({
-                where: { username },
+                where: { username: username.toLowerCase() },
             });
-            if (existingUsername) {
+            if (existingUsername && (existingUsername.status !== UserStatus.PENDING_VERIFICATION || existingUsername.emailVerified)) {
                 throw new ConflictException('Username already taken');
+            }
+            // If the existing username belongs to an unverified user, release it
+            if (existingUsername && existingUsername.status === UserStatus.PENDING_VERIFICATION && !existingUsername.emailVerified) {
+                await this.userRepository.update(existingUsername.id, { username: () => 'NULL' } as any);
+                this.logger.log(`[OTP] Released stale username '${username}' from unverified user ${existingUsername.id}`);
             }
         }
 
@@ -505,7 +510,10 @@ export class AuthService {
 
             // Create Stripe customer
             try {
-                await this.paymentsService.createCustomer(user.id, email, `${firstName} ${lastName}`);
+                const stripeCustomerId = await this.paymentsService.createCustomer(email, `${firstName} ${lastName}`);
+                if (stripeCustomerId) {
+                    await this.userRepository.update(user.id, { stripeCustomerId });
+                }
             } catch (err) {
                 this.logger.warn(`[GoogleSignIn] Stripe customer creation failed: ${err.message}`);
             }

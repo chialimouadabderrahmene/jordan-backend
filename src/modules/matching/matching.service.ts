@@ -233,7 +233,7 @@ export class MatchingService {
         const enriched = await Promise.all(
             topCandidates.map(async ({ profile: p, score }) => {
                 const photo = await this.photoRepository.findOne({
-                    where: { userId: p.userId, isMain: true },
+                    where: { userId: p.userId, isMain: true, moderationStatus: 'approved' as any },
                 });
                 return {
                     userId: p.userId,
@@ -488,7 +488,7 @@ export class MatchingService {
         const enriched = await Promise.all(
             scored.slice(0, limit).map(async ({ profile: p, score }) => {
                 const photo = await this.photoRepository.findOne({
-                    where: { userId: p.userId, isMain: true },
+                    where: { userId: p.userId, isMain: true, moderationStatus: 'approved' as any },
                 });
                 return {
                     userId: p.userId,

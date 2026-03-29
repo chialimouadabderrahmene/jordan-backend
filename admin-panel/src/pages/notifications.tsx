@@ -92,7 +92,7 @@ export default function NotificationsPage() {
       MATCH: { variant: 'success', label: 'Match' },
       MESSAGE: { variant: 'info', label: 'Message' },
       LIKE: { variant: 'default', label: 'Like' },
-      SUPER_LIKE: { variant: 'warning', label: 'Super Like' },
+      COMPLIMENT: { variant: 'warning', label: 'Compliment' },
       SYSTEM: { variant: 'secondary', label: 'System' },
     }
     const info = map[type] || { variant: 'outline', label: type }

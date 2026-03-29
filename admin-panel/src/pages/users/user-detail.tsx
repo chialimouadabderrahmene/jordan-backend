@@ -42,7 +42,6 @@ import {
   Loader2,
   AlertTriangle,
   Heart,
-  Sparkles,
   MessageCircleHeart,
   MessageSquare,
   HeartOff,
@@ -574,12 +573,6 @@ export default function UserDetailPage() {
                   <p className="text-[10px] text-muted-foreground">given / received</p>
                 </CardContent></Card>
                 <Card><CardContent className="p-4 text-center">
-                  <Sparkles className="h-5 w-5 text-purple-500 mx-auto mb-1" />
-                  <p className="text-xs text-muted-foreground">Super Likes</p>
-                  <p className="text-lg font-bold">{activity.superLikes?.given ?? 0} / {activity.superLikes?.received ?? 0}</p>
-                  <p className="text-[10px] text-muted-foreground">given / received</p>
-                </CardContent></Card>
-                <Card><CardContent className="p-4 text-center">
                   <MessageCircleHeart className="h-5 w-5 text-amber-500 mx-auto mb-1" />
                   <p className="text-xs text-muted-foreground">Compliments</p>
                   <p className="text-lg font-bold">{activity.compliments?.given ?? 0} / {activity.compliments?.received ?? 0}</p>
@@ -646,7 +639,7 @@ export default function UserDetailPage() {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                   <div className="absolute top-2 right-2 flex gap-1">
                     <Badge
-                      variant={photo.moderationStatus === 'APPROVED' ? 'success' : photo.moderationStatus === 'REJECTED' ? 'destructive' : 'warning'}
+                      variant={photo.moderationStatus === 'approved' ? 'success' : photo.moderationStatus === 'rejected' ? 'destructive' : 'warning'}
                       className="text-[9px]"
                     >
                       {photo.moderationStatus}

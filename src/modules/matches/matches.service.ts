@@ -56,6 +56,7 @@ export class MatchesService {
                 .createQueryBuilder('photo')
                 .where('photo.userId IN (:...otherUserIds)', { otherUserIds })
                 .andWhere('photo.isMain = :isMain', { isMain: true })
+                .andWhere('photo.moderationStatus = :approvedStatus', { approvedStatus: 'approved' })
                 .getMany()
             : [];
         const photoMap = new Map(photos.map(p => [p.userId, CloudinaryService.thumbnailUrl(p.url)]));
@@ -275,6 +276,7 @@ export class MatchesService {
         const photos = await this.photoRepository
             .createQueryBuilder('photo')
             .where('photo.userId IN (:...userIds)', { userIds })
+            .andWhere('photo.moderationStatus = :approvedStatus', { approvedStatus: 'approved' })
             .orderBy('photo.isMain', 'DESC')
             .addOrderBy('photo.order', 'ASC')
             .getMany();

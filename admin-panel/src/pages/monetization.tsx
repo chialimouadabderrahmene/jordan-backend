@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 const ALL_FEATURES = [
-  'unlimited_likes', 'advanced_filters', 'see_who_liked', 'super_like',
+  'unlimited_likes', 'advanced_filters', 'see_who_liked',
   'profile_boost', 'read_receipts', 'priority_matching', 'rewind',
   'invisible_mode', 'compliment_credits', 'rematch', 'premium_badge',
   'hide_ads', 'passport_mode', 'improved_visits'
@@ -189,7 +189,7 @@ export default function MonetizationPage() {
                     <div className="text-xs text-muted-foreground mb-2 grid grid-cols-2 gap-1">
                       <p>Likes: {plan.dailyLikesLimit === -1 ? 'Unlimited' : plan.dailyLikesLimit}/d</p>
                       <p>Rewinds: {plan.monthlyRewindsLimit}/mo</p>
-                      <p>S-Likes: {plan.dailySuperLikesLimit}/d</p>
+                      <p>Compliments: {plan.dailyComplimentsLimit}/d</p>
                       <p>Boosts: {plan.weeklyBoostsLimit}/wk</p>
                     </div>
                     {plan.features && (
@@ -254,8 +254,8 @@ export default function MonetizationPage() {
                     <Input type="number" value={formData.dailyLikesLimit} onChange={e => setFormData({...formData, dailyLikesLimit: Number(e.target.value)})} />
                   </div>
                   <div>
-                    <label className="text-xs">Daily Super Likes</label>
-                    <Input type="number" value={formData.dailySuperLikesLimit} onChange={e => setFormData({...formData, dailySuperLikesLimit: Number(e.target.value)})} />
+                    <label className="text-xs">Daily Compliments</label>
+                    <Input type="number" value={formData.dailyComplimentsLimit} onChange={e => setFormData({...formData, dailyComplimentsLimit: Number(e.target.value)})} />
                   </div>
                   <div>
                     <label className="text-xs">Monthly Rewinds</label>

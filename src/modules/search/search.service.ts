@@ -249,6 +249,7 @@ export class SearchService {
             ? await this.photoRepository
                 .createQueryBuilder('photo')
                 .where('photo.userId IN (:...userIds)', { userIds })
+                .andWhere('photo.moderationStatus = :approvedStatus', { approvedStatus: 'approved' })
                 .orderBy('photo.isMain', 'DESC')
                 .addOrderBy('photo.order', 'ASC')
                 .getMany()

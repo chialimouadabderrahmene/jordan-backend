@@ -7,7 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserStatus } from '../../database/entities/user.entity';
 import { Profile } from '../../database/entities/profile.entity';
-import { Photo } from '../../database/entities/photo.entity';
+import { Photo, PhotoModerationStatus } from '../../database/entities/photo.entity';
 import { Like, LikeType } from '../../database/entities/like.entity';
 import { Boost } from '../../database/entities/boost.entity';
 import { RedisService } from '../redis/redis.service';
@@ -104,9 +104,15 @@ export class UsersService {
     async getPublicProfile(userId: string): Promise<Partial<User>> {
         const user = await this.userRepository.findOne({
             where: { id: userId },
-            relations: ['profile', 'photos'],
+            relations: ['profile'],
         });
         if (!user) throw new NotFoundException('User not found');
+
+        // Only return approved photos to other users
+        const photos = await this.photoRepository.find({
+            where: { userId, moderationStatus: PhotoModerationStatus.APPROVED },
+            order: { isMain: 'DESC', order: 'ASC' },
+        });
 
         // Explicit whitelist — never expose sensitive fields to other users
         return {
@@ -118,7 +124,7 @@ export class UsersService {
             selfieVerified: user.selfieVerified,
             createdAt: user.createdAt,
             profile: user.profile,
-            photos: user.photos || [],
+            photos: photos || [],
         } as Partial<User>;
     }
 
@@ -137,9 +143,14 @@ export class UsersService {
     }
 
     async isUsernameAvailable(username: string): Promise<boolean> {
-        const count = await this.userRepository.count({
+        const user = await this.userRepository.findOne({
             where: { username: username.toLowerCase() },
         });
-        return count === 0;
+        if (!user) return true;
+        // Username held by an unverified user is considered available
+        if (user.status === UserStatus.PENDING_VERIFICATION && !user.emailVerified) {
+            return true;
+        }
+        return false;
     }
 }

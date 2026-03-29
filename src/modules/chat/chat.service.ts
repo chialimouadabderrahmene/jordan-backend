@@ -55,6 +55,7 @@ export class ChatService {
                 .createQueryBuilder('photo')
                 .where('photo.userId IN (:...otherUserIds)', { otherUserIds })
                 .andWhere('photo.isMain = :isMain', { isMain: true })
+                .andWhere('photo.moderationStatus = :approvedStatus', { approvedStatus: 'approved' })
                 .getMany()
             : [];
         const photoMap = new Map(photos.map(p => [p.userId, p.url]));
