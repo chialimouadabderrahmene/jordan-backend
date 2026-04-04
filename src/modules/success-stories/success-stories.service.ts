@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SuccessStory, SuccessStoryStatus } from '../../database/entities/success-story.entity';
@@ -6,6 +6,8 @@ import { PaginationDto } from '../../common/dto/pagination.dto';
 
 @Injectable()
 export class SuccessStoriesService {
+    private readonly logger = new Logger(SuccessStoriesService.name);
+
     constructor(
         @InjectRepository(SuccessStory)
         private readonly storyRepository: Repository<SuccessStory>,
@@ -29,32 +31,70 @@ export class SuccessStoriesService {
     }
 
     async getApprovedStories(pagination: PaginationDto) {
-        const [stories, total] = await this.storyRepository.findAndCount({
-            where: { status: SuccessStoryStatus.APPROVED },
-            relations: ['user', 'partner'],
-            order: { createdAt: 'DESC' },
-            skip: pagination.skip,
-            take: pagination.limit,
-        });
+        try {
+            const [stories, total] = await this.storyRepository.findAndCount({
+                where: { status: SuccessStoryStatus.APPROVED },
+                relations: ['user', 'partner'],
+                order: { createdAt: 'DESC' },
+                skip: pagination.skip,
+                take: pagination.limit,
+            });
 
-        const sanitized = stories.map(s => ({
+            return {
+                stories: this.sanitizeStories(stories),
+                total,
+                page: pagination.page,
+                limit: pagination.limit,
+            };
+        } catch (error) {
+            this.logger.error(
+                'Failed to load success stories with relations, falling back to relationless query',
+                error instanceof Error ? error.stack : String(error),
+            );
+
+            const [stories, total] = await this.storyRepository.findAndCount({
+                where: { status: SuccessStoryStatus.APPROVED },
+                order: { createdAt: 'DESC' },
+                skip: pagination.skip,
+                take: pagination.limit,
+            });
+
+            return {
+                stories: this.sanitizeStories(stories),
+                total,
+                page: pagination.page,
+                limit: pagination.limit,
+            };
+        }
+    }
+
+    private sanitizeStories(stories: SuccessStory[]) {
+        return stories.map((s) => ({
             id: s.id,
+            userId: s.userId,
+            partnerId: s.partnerId,
             title: s.title,
             story: s.story,
-            photoUrl: s.photoUrl,
+            photoUrl: s.showPhoto ? s.photoUrl : null,
+            status: s.status,
+            isAnonymous: s.isAnonymous,
+            showNames: s.showNames,
+            showPhoto: s.showPhoto,
             likes: s.likes,
             createdAt: s.createdAt,
-            user: s.isAnonymous ? null : (s.showNames ? {
-                firstName: s.user?.firstName,
-                lastName: s.user?.lastName,
-            } : null),
-            partner: s.isAnonymous ? null : (s.showNames && s.partner ? {
-                firstName: s.partner?.firstName,
-                lastName: s.partner?.lastName,
-            } : null),
+            user: s.isAnonymous || !s.showNames || !s.user
+                ? null
+                : {
+                    firstName: s.user.firstName,
+                    lastName: s.user.lastName,
+                },
+            partner: s.isAnonymous || !s.showNames || !s.partner
+                ? null
+                : {
+                    firstName: s.partner.firstName,
+                    lastName: s.partner.lastName,
+                },
         }));
-
-        return { stories: sanitized, total, page: pagination.page, limit: pagination.limit };
     }
 
     async likeStory(storyId: string): Promise<void> {
@@ -67,8 +107,6 @@ export class SuccessStoriesService {
             order: { createdAt: 'DESC' },
         });
     }
-
-    // ─── ADMIN ───────────────────────────────────────────────
 
     async getPendingStories(pagination: PaginationDto) {
         const [stories, total] = await this.storyRepository.findAndCount({
@@ -90,3 +128,4 @@ export class SuccessStoriesService {
         return this.storyRepository.save(story);
     }
 }
+
