@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
 import { User } from '../../database/entities/user.entity';
@@ -50,7 +50,7 @@ export class TrustSafetyService {
         private readonly cloudinaryService: CloudinaryService,
     ) { }
 
-    // ─── VERIFICATION UPLOADS ────────────────────────────────
+    // â”€â”€â”€ VERIFICATION UPLOADS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async uploadSelfie(userId: string, file: Express.Multer.File) {
         if (!file) throw new BadRequestException('No selfie file provided');
@@ -70,37 +70,47 @@ export class TrustSafetyService {
         };
     }
 
-    async uploadIdDocument(userId: string, file: Express.Multer.File) {
+    async uploadIdDocument(
+        userId: string,
+        file: Express.Multer.File,
+        documentType?: string,
+    ) {
         if (!file) throw new BadRequestException('No document file provided');
+
+        const allowedDocumentTypes = ['passport', 'national_id', 'driving_license'];
+        const normalizedDocumentType = allowedDocumentTypes.includes(documentType || '')
+            ? documentType!
+            : 'national_id';
 
         const result = await this.cloudinaryService.uploadImage(file);
         await this.userRepository.update(userId, {
             documentUrl: result.secure_url,
+            documentType: normalizedDocumentType,
             documentVerified: false,
             documentVerifiedAt: null,
             documentRejectionReason: null,
         } as any);
 
-        // Store ID document URL in Redis (pending admin review)
         await this.redisService.set(`id_doc:${userId}`, result.secure_url, 0);
         await this.redisService.set(this.idDocumentStatusKey(userId), 'pending_review');
 
-        // Create a content flag for admin review
         await this.contentFlagRepository.save({
             userId,
             type: ContentFlagType.OTHER,
             status: ContentFlagStatus.PENDING,
             source: ContentFlagSource.USER_REPORT,
-            content: `ID document uploaded for verification: ${result.secure_url}`,
+            content: `Identity document (${normalizedDocumentType}) uploaded for verification: ${result.secure_url}`,
             entityType: 'verification',
             entityId: userId,
             confidenceScore: 1.0,
         });
 
-        this.logger.log(`ID document uploaded for user ${userId}`);
+        this.logger.log(`Identity document uploaded for user ${userId} (${normalizedDocumentType})`);
         return {
-            message: 'ID document uploaded. It will be reviewed by our team within 24-48 hours.',
+            message: 'Identity document uploaded. It will be reviewed by our team within 24-48 hours.',
             status: 'pending_review',
+            documentType: normalizedDocumentType,
+            documentUrl: result.secure_url,
         };
     }
 
@@ -142,6 +152,10 @@ export class TrustSafetyService {
                 'selfieUrl',
                 'trustScore',
                 'documentVerified',
+                'documentUrl',
+                'documentType',
+                'documentVerifiedAt',
+                'documentRejectionReason',
             ],
         });
 
@@ -154,7 +168,9 @@ export class TrustSafetyService {
         const idDocumentStatus = user?.documentVerified
             ? 'verified'
             : (await this.redisService.get(this.idDocumentStatusKey(userId))) ||
-              (idDocUrl ? 'pending_review' : 'not_uploaded');
+              (user?.documentRejectionReason
+                  ? 'reverify_required'
+                  : ((idDocUrl || user?.documentUrl) ? 'pending_review' : 'not_uploaded'));
         const marriageCertStatus =
             (await this.redisService.get(this.marriageCertStatusKey(userId))) ||
             (marriageCertUrl ? 'pending_review' : 'not_uploaded');
@@ -164,15 +180,20 @@ export class TrustSafetyService {
             selfieVerified: user?.selfieVerified ?? false,
             selfieUploaded: !!user?.selfieUrl,
             selfieStatus,
-            idDocumentUploaded: !!idDocUrl,
+            idDocumentUploaded: !!(idDocUrl || user?.documentUrl),
             idDocumentStatus,
+            documentUrl: user?.documentUrl || idDocUrl || null,
+            documentType: user?.documentType || null,
+            documentVerified: user?.documentVerified ?? false,
+            documentVerifiedAt: user?.documentVerifiedAt ?? null,
+            documentRejectionReason: user?.documentRejectionReason || null,
             marriageCertUploaded: !!marriageCertUrl,
             marriageCertStatus,
             trustScore: user?.trustScore ?? 100,
         };
     }
 
-    // ─── CONTENT MODERATION (BAD WORDS FILTER) ─────────────
+    // â”€â”€â”€ CONTENT MODERATION (BAD WORDS FILTER) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     filterBadWords(text: string): { clean: string; hasBadWords: boolean; flaggedWords: string[] } {
         const flaggedWords: string[] = [];
@@ -234,7 +255,7 @@ export class TrustSafetyService {
         return { isClean: !result.hasBadWords, cleanText: result.clean };
     }
 
-    // ─── FAKE ACCOUNT DETECTION ─────────────────────────────
+    // â”€â”€â”€ FAKE ACCOUNT DETECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async detectSuspiciousBehavior(userId: string): Promise<{ isSuspicious: boolean; reasons: string[] }> {
         const reasons: string[] = [];
@@ -310,7 +331,7 @@ export class TrustSafetyService {
         return { isSuspicious, reasons };
     }
 
-    // ─── SHADOW BANNING ─────────────────────────────────────
+    // â”€â”€â”€ SHADOW BANNING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async shadowBanUser(userId: string): Promise<void> {
         await this.userRepository.update(userId, { isShadowBanned: true });
@@ -333,7 +354,7 @@ export class TrustSafetyService {
         return banned;
     }
 
-    // ─── SELFIE VS PROFILE PHOTO COMPARISON (MOCK AI) ──────
+    // â”€â”€â”€ SELFIE VS PROFILE PHOTO COMPARISON (MOCK AI) â”€â”€â”€â”€â”€â”€
 
     async compareSelfieToPhotos(
         userId: string,
@@ -396,7 +417,7 @@ export class TrustSafetyService {
         };
     }
 
-    // ─── TRUST SCORE MANAGEMENT ─────────────────────────────
+    // â”€â”€â”€ TRUST SCORE MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async decrementTrustScore(userId: string, amount: number): Promise<void> {
         await this.userRepository
@@ -427,7 +448,7 @@ export class TrustSafetyService {
         return user?.trustScore ?? 100;
     }
 
-    // ─── CONTENT FLAGS ADMIN ────────────────────────────────
+    // â”€â”€â”€ CONTENT FLAGS ADMIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getPendingFlags(page: number = 1, limit: number = 20) {
         const [flags, total] = await this.contentFlagRepository.findAndCount({
@@ -468,7 +489,7 @@ export class TrustSafetyService {
             await this.userRepository.update(flag.userId, { selfieVerified: approved });
             await this.redisService.set(
                 this.selfieStatusKey(flag.userId),
-                approved ? 'verified' : 'rejected',
+                approved ? 'verified' : 'reverify_required',
             );
             if (approved) {
                 await this.incrementTrustScore(flag.userId, 10);
@@ -483,20 +504,30 @@ export class TrustSafetyService {
                 await this.userRepository.update(flag.userId, {
                     documentVerified: approved,
                     documentVerifiedAt: approved ? new Date() : null,
-                    documentRejectionReason: approved ? null : (note ?? 'Document review rejected'),
+                    documentRejectionReason: approved
+                        ? null
+                        : (note ??
+                              "Please upload a clearer passport, national ID, or driver's license."),
                 } as any);
                 await this.redisService.set(
                     this.idDocumentStatusKey(flag.userId),
-                    approved ? 'verified' : 'rejected',
+                    approved ? 'verified' : 'reverify_required',
                 );
             }
 
             if (normalizedContent.includes('marriage certificate')) {
                 await this.redisService.set(
                     this.marriageCertStatusKey(flag.userId),
-                    approved ? 'verified' : 'rejected',
+                    approved ? 'verified' : 'reverify_required',
                 );
             }
         }
     }
 }
+
+
+
+
+
+
+

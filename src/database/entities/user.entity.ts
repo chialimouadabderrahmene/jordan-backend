@@ -108,10 +108,10 @@ export class User {
     documentVerified: boolean;
 
     @Column({ nullable: true })
-    documentVerifiedAt: Date;
+    documentVerifiedAt: Date | null;
 
     @Column({ nullable: true })
-    documentRejectionReason: string;
+    documentRejectionReason: string | null;
 
     @Column({ default: 'not_started' })
     backgroundCheckStatus: string;
