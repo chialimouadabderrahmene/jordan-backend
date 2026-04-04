@@ -23,6 +23,7 @@ import {
     FamilyPlans,
     CommunicationStyle,
     MarriageIntention,
+    IntentMode,
     SecondWifePreference,
     BloodType,
     WorkoutFrequency,
@@ -163,6 +164,11 @@ export class CreateProfileDto {
     @IsOptional()
     @IsEnum(MarriageIntention)
     marriageIntention?: MarriageIntention;
+
+    @ApiPropertyOptional({ enum: IntentMode })
+    @IsOptional()
+    @IsEnum(IntentMode)
+    intentMode?: IntentMode;
 
     @ApiPropertyOptional({ enum: SecondWifePreference })
     @IsOptional()
@@ -414,3 +420,5 @@ export class UpdatePreferencesDto {
     @IsEnum(SecondWifePreference)
     preferredSecondWifePreference?: SecondWifePreference;
 }
+
+

@@ -105,8 +105,15 @@ export class SwipesService {
         await this.likeRepository.save(like);
         await this.invalidateDiscoveryCaches(userId);
 
-        // Notify target user for super-like or compliment
-        if (action === SwipeAction.SUPER_LIKE) {
+        // Notify target user for like actions
+        if (action === SwipeAction.LIKE) {
+            this.notificationsService.createNotification(targetUserId, {
+                type: 'like',
+                title: 'Someone liked your profile',
+                body: 'Open Methna to see who is interested in you.',
+                data: { likerId: userId },
+            }).catch(() => { });
+        } else if (action === SwipeAction.SUPER_LIKE) {
             this.notificationsService.createNotification(targetUserId, {
                 type: 'super_like',
                 title: 'Someone Super Liked you!',
@@ -359,6 +366,22 @@ export class SwipesService {
         return isPremium;
     }
 
+    private async invalidateDiscoveryCaches(...userIds: string[]): Promise<void> {
+        const uniqueIds = [
+            ...new Set(userIds.map((id) => id?.trim()).filter((id): id is string => !!id)),
+        ];
+        if (uniqueIds.length === 0) return;
+
+        await Promise.all(
+            uniqueIds.flatMap((id) => [
+                this.redisService.del(`excludeIds:${id}`),
+                this.redisService.del(`discovery:${id}`),
+                this.redisService.del(`suggestions:${id}`),
+                this.redisService.delByPattern(`search:${id}:*`),
+            ]),
+        );
+    }
+
     // ─── REMATCH / SECOND CHANCE (premium feature) ────────
 
     private async invalidateDiscoveryCaches(...userIds: string[]): Promise<void> {
@@ -424,7 +447,7 @@ export class SwipesService {
 
         // Notify target
         await this.notificationsService.createNotification(targetUserId, {
-            type: 'like',
+            type: 'rematch',
             title: 'Second Chance Request',
             body: message || 'Someone wants a second chance to connect with you!',
             data: { rematchRequestId: saved.id, requesterId: userId },
@@ -494,3 +517,5 @@ export class SwipesService {
         }));
     }
 }
+
+

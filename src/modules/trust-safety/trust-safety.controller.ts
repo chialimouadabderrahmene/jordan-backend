@@ -1,4 +1,4 @@
-import {
+﻿import {
     Controller,
     Get,
     Post,
@@ -31,8 +31,7 @@ export class TrustSafetyController {
         private readonly backgroundCheckService: BackgroundCheckService,
     ) { }
 
-    // ─── Selfie Upload + Verify ──────────────────────────────
-
+    // Selfie Upload + Verify
     @Post('selfie-upload')
     @UseInterceptors(FileInterceptor('selfie'))
     @ApiConsumes('multipart/form-data')
@@ -58,8 +57,7 @@ export class TrustSafetyController {
         return this.trustSafetyService.compareSelfieToPhotos(userId);
     }
 
-    // ─── ID Document Upload ──────────────────────────────────
-
+    // Identity Document Upload
     @Post('id-upload')
     @UseInterceptors(FileInterceptor('document'))
     @ApiConsumes('multipart/form-data')
@@ -68,19 +66,27 @@ export class TrustSafetyController {
             type: 'object',
             properties: {
                 document: { type: 'string', format: 'binary' },
+                documentType: {
+                    type: 'string',
+                    enum: ['passport', 'national_id', 'driving_license'],
+                },
             },
         },
     })
-    @ApiOperation({ summary: 'Upload an ID document for identity verification' })
+    @ApiOperation({ summary: 'Upload an identity document for manual verification' })
     async uploadIdDocument(
         @CurrentUser('sub') userId: string,
         @UploadedFile() file: Express.Multer.File,
+        @Body() body: { documentType?: string },
     ) {
-        return this.trustSafetyService.uploadIdDocument(userId, file);
+        return this.trustSafetyService.uploadIdDocument(
+            userId,
+            file,
+            body?.documentType,
+        );
     }
 
-    // ─── Marriage Certificate Upload ─────────────────────────
-
+    // Marriage Certificate Upload
     @Post('marriage-cert-upload')
     @UseInterceptors(FileInterceptor('certificate'))
     @ApiConsumes('multipart/form-data')
@@ -100,8 +106,7 @@ export class TrustSafetyController {
         return this.trustSafetyService.uploadMarriageCert(userId, file);
     }
 
-    // ─── Verification Status ─────────────────────────────────
-
+    // Verification Status
     @Get('verification-status')
     @ApiOperation({ summary: 'Get current verification status of user' })
     async getVerificationStatus(@CurrentUser('sub') userId: string) {
@@ -115,8 +120,7 @@ export class TrustSafetyController {
         return { trustScore: score };
     }
 
-    // ─── ADMIN ENDPOINTS ────────────────────────────────────
-
+    // Admin endpoints
     @Get('admin/flags')
     @UseGuards(RolesGuard)
     @Roles(UserRole.ADMIN)
@@ -167,8 +171,7 @@ export class TrustSafetyController {
         return this.trustSafetyService.detectSuspiciousBehavior(userId);
     }
 
-    // ─── BACKGROUND CHECK ────────────────────────────────────
-
+    // Background check
     @Post('background-check')
     @ApiOperation({ summary: 'Initiate a background check (requires consent)' })
     async initiateBackgroundCheck(

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
+﻿import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike, Not, IsNull } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -18,6 +18,7 @@ import { Ad } from '../../database/entities/ad.entity';
 import { BlockedUser } from '../../database/entities/blocked-user.entity';
 import { Plan } from '../../database/entities/plan.entity';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -54,9 +55,10 @@ export class AdminService implements OnModuleInit {
         private readonly blockedUserRepository: Repository<BlockedUser>,
         @InjectRepository(Plan)
         private readonly planRepository: Repository<Plan>,
+        private readonly redisService: RedisService,
     ) { }
 
-    // ─── AUTO-SEED ADMIN ON STARTUP ──────────────────────────
+    // â”€â”€â”€ AUTO-SEED ADMIN ON STARTUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async onModuleInit() {
         try {
@@ -88,14 +90,14 @@ export class AdminService implements OnModuleInit {
                 });
 
                 await this.userRepository.save(admin);
-                this.logger.warn(`🔑 Auto-seeded admin account: ${email}`);
+                this.logger.warn(`ًں”‘ Auto-seeded admin account: ${email}`);
             }
         } catch (error) {
             this.logger.error('Failed to auto-seed admin:', error.message);
         }
     }
 
-    // ─── USER MANAGEMENT ────────────────────────────────────
+    // â”€â”€â”€ USER MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getUsers(pagination: PaginationDto, status?: UserStatus, search?: string, role?: UserRole, plan?: string) {
         const qb = this.userRepository.createQueryBuilder('user');
@@ -131,11 +133,15 @@ export class AdminService implements OnModuleInit {
         return { user, profile, photos, subscription };
     }
 
-    // ─── DOCUMENT VERIFICATION ─────────────────────────────────
+    // â”€â”€â”€ DOCUMENT VERIFICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getPendingDocuments() {
         return this.userRepository.find({
-            where: { documentUrl: Not(IsNull()), documentVerified: false },
+            where: {
+                documentUrl: Not(IsNull()),
+                documentVerified: false,
+                documentRejectionReason: IsNull(),
+            },
             order: { createdAt: 'DESC' },
         });
     }
@@ -145,37 +151,72 @@ export class AdminService implements OnModuleInit {
         if (!user) throw new NotFoundException('User not found');
         if (!user.documentUrl) throw new BadRequestException('User has no document uploaded');
 
+        const reverifyMessage =
+            rejectionReason ||
+            "Please upload a clearer passport, national ID, or driver's license.";
+
         user.documentVerified = approved;
-        user.documentVerifiedAt = new Date();
-        (user as any).documentRejectionReason = approved ? null : (rejectionReason || 'Document rejected by admin');
+        user.documentVerifiedAt = approved ? new Date() : null;
+        (user as any).documentRejectionReason = approved
+            ? null
+            : reverifyMessage;
 
         if (approved && user.status === UserStatus.PENDING_VERIFICATION) {
             user.status = UserStatus.ACTIVE;
         }
 
-        this.logger.log(`Admin ${approved ? 'approved' : 'rejected'} document for user ${userId}`);
-        return this.userRepository.save(user);
+        const savedUser = await this.userRepository.save(user);
+        await this.redisService.set(
+            `id_doc_status:${userId}`,
+            approved ? 'verified' : 'reverify_required',
+            0,
+        );
+
+        await this.notificationRepository.save(
+            this.notificationRepository.create({
+                userId,
+                type: NotificationType.VERIFICATION,
+                title: approved ? 'Identity verified' : 'Reverify your identity',
+                body: approved
+                    ? 'Your identity document has been approved by the Methna team.'
+                    : reverifyMessage,
+                data: {
+                    status: approved ? 'verified' : 'reverify_required',
+                    documentType: user.documentType ?? null,
+                    rejectionReason: approved ? null : reverifyMessage,
+                },
+            }),
+        );
+
+        this.logger.log(`Admin ${approved ? 'approved' : 'requested reverify for'} identity document of user ${userId}`);
+        return savedUser;
     }
 
     async autoApproveDocuments() {
         const pending = await this.userRepository.find({
-            where: { documentUrl: Not(IsNull()), documentVerified: false },
+            where: {
+                documentUrl: Not(IsNull()),
+                documentVerified: false,
+                documentRejectionReason: IsNull(),
+            },
         });
         let count = 0;
         for (const user of pending) {
             user.documentVerified = true;
             user.documentVerifiedAt = new Date();
+            (user as any).documentRejectionReason = null;
             if (user.status === UserStatus.PENDING_VERIFICATION) {
                 user.status = UserStatus.ACTIVE;
             }
             await this.userRepository.save(user);
+            await this.redisService.set(`id_doc_status:${user.id}`, 'verified', 0);
             count++;
         }
         this.logger.log(`Auto-approved ${count} pending documents`);
         return { approved: count };
     }
 
-    // ─── CREATE USER ──────────────────────────────────────────
+    // â”€â”€â”€ CREATE USER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async createUser(dto: {
         email: string; password: string; firstName: string; lastName: string;
@@ -207,7 +248,7 @@ export class AdminService implements OnModuleInit {
         return user;
     }
 
-    // ─── UPDATE USER ──────────────────────────────────────────
+    // â”€â”€â”€ UPDATE USER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async updateUser(userId: string, dto: Partial<User>) {
         const user = await this.userRepository.findOne({ where: { id: userId } });
@@ -219,7 +260,7 @@ export class AdminService implements OnModuleInit {
         return this.userRepository.save(user);
     }
 
-    // ─── PER-USER ACTIVITY ────────────────────────────────────
+    // â”€â”€â”€ PER-USER ACTIVITY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getUserActivity(userId: string) {
         const [
@@ -265,7 +306,7 @@ export class AdminService implements OnModuleInit {
         };
     }
 
-    // ─── SWIPES / ACTIVITY FEED ───────────────────────────────
+    // â”€â”€â”€ SWIPES / ACTIVITY FEED â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getSwipes(pagination: PaginationDto, type?: LikeType) {
         const where: any = {};
@@ -282,7 +323,7 @@ export class AdminService implements OnModuleInit {
         return { swipes, total, page: pagination.page, limit: pagination.limit };
     }
 
-    // ─── MATCHES (ADMIN VIEW) ─────────────────────────────────
+    // â”€â”€â”€ MATCHES (ADMIN VIEW) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getMatches(pagination: PaginationDto) {
         const [matches, total] = await this.matchRepository.findAndCount({
@@ -294,7 +335,7 @@ export class AdminService implements OnModuleInit {
         return { matches, total, page: pagination.page, limit: pagination.limit };
     }
 
-    // ─── CONVERSATIONS (ADMIN VIEW) ───────────────────────────
+    // â”€â”€â”€ CONVERSATIONS (ADMIN VIEW) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getConversations(pagination: PaginationDto) {
         const [conversations, total] = await this.conversationRepository.findAndCount({
@@ -317,7 +358,7 @@ export class AdminService implements OnModuleInit {
         return { messages, total, page: pagination.page, limit: pagination.limit };
     }
 
-    // ─── SEND NOTIFICATION ────────────────────────────────────
+    // â”€â”€â”€ SEND NOTIFICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async sendNotification(dto: {
         userId?: string; title: string; body: string; type?: string; broadcast?: boolean;
@@ -350,7 +391,7 @@ export class AdminService implements OnModuleInit {
         return { sent: 1, notification: notif };
     }
 
-    // ─── SUPPORT TICKETS ──────────────────────────────────────
+    // â”€â”€â”€ SUPPORT TICKETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getTickets(pagination: PaginationDto, status?: TicketStatus) {
         const where: any = {};
@@ -395,7 +436,7 @@ export class AdminService implements OnModuleInit {
         return this.ticketRepository.save(ticket);
     }
 
-    // ─── ADS MANAGEMENT ───────────────────────────────────────
+    // â”€â”€â”€ ADS MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getAds() {
         return this.adRepository.find({ order: { createdAt: 'DESC' } });
@@ -418,7 +459,7 @@ export class AdminService implements OnModuleInit {
         if (res.affected === 0) throw new NotFoundException('Ad not found');
     }
 
-    // ─── BOOSTS ───────────────────────────────────────────────
+    // â”€â”€â”€ BOOSTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getBoosts(pagination: PaginationDto) {
         const [boosts, total] = await this.boostRepository.findAndCount({
@@ -430,7 +471,7 @@ export class AdminService implements OnModuleInit {
         return { boosts, total, page: pagination.page, limit: pagination.limit };
     }
 
-    // ─── PLAN MANAGEMENT ──────────────────────────────────────
+    // â”€â”€â”€ PLAN MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getPlans() {
         return this.planRepository.find({ order: { createdAt: 'ASC' } });
@@ -482,7 +523,7 @@ export class AdminService implements OnModuleInit {
         return this.subscriptionRepository.save(sub);
     }
 
-    // ─── SUBSCRIPTIONS OVERVIEW ───────────────────────────────
+    // â”€â”€â”€ SUBSCRIPTIONS OVERVIEW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getSubscriptions(pagination: PaginationDto, plan?: string) {
         const where: any = {};
@@ -519,7 +560,7 @@ export class AdminService implements OnModuleInit {
         this.logger.warn(`Admin deleted user account: ${userId}`);
     }
 
-    // ─── REPORTS ────────────────────────────────────────────
+    // â”€â”€â”€ REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getReports(pagination: PaginationDto, status?: ReportStatus) {
         const where: any = {};
@@ -553,7 +594,7 @@ export class AdminService implements OnModuleInit {
         });
     }
 
-    // ─── PHOTO MODERATION ───────────────────────────────────
+    // â”€â”€â”€ PHOTO MODERATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getPendingPhotos(pagination: PaginationDto) {
         const [photos, total] = await this.photoRepository.findAndCount({
@@ -579,7 +620,7 @@ export class AdminService implements OnModuleInit {
         return this.photoRepository.findOne({ where: { id: photoId } });
     }
 
-    // ─── ANALYTICS / DASHBOARD ──────────────────────────────
+    // â”€â”€â”€ ANALYTICS / DASHBOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getDashboardStats() {
         const [
@@ -685,3 +726,9 @@ export class AdminService implements OnModuleInit {
         };
     }
 }
+
+
+
+
+
+

@@ -1,4 +1,4 @@
-import {
+﻿import {
     Controller,
     Get,
     Post,
@@ -89,7 +89,7 @@ export class AdminController {
         private readonly redisService: RedisService,
     ) { }
 
-    // ─── USERS ──────────────────────────────────────────────
+    // â”€â”€â”€ USERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('users')
     @ApiOperation({ summary: 'List all users with search and filters' })
@@ -145,7 +145,7 @@ export class AdminController {
         return this.adminService.updateUserStatus(userId, dto.status);
     }
 
-    // ─── DOCUMENT VERIFICATION ────────────────────────────────
+    // â”€â”€â”€ DOCUMENT VERIFICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('documents/pending')
     @ApiOperation({ summary: 'Get all users with pending document verification' })
@@ -154,7 +154,7 @@ export class AdminController {
     }
 
     @Patch('documents/:userId/verify')
-    @ApiOperation({ summary: 'Approve or reject a user document' })
+    @ApiOperation({ summary: 'Approve a user document or request reverify' })
     async verifyDocument(
         @CurrentUser('sub') adminId: string,
         @Param('userId') userId: string,
@@ -163,7 +163,7 @@ export class AdminController {
         this.redisService.appendAuditLog({
             type: 'admin',
             adminId,
-            action: dto.approved ? 'approve_document' : 'reject_document',
+            action: dto.approved ? 'approve_document' : 'request_document_reverify',
             targetUserId: userId,
         }).catch(() => {});
         return this.adminService.verifyDocument(userId, dto.approved, dto.rejectionReason);
@@ -208,7 +208,7 @@ export class AdminController {
         return { message: `All sessions revoked for user ${userId}` };
     }
 
-    // ─── SWIPES / ACTIVITY ──────────────────────────────────
+    // â”€â”€â”€ SWIPES / ACTIVITY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('swipes')
     @ApiOperation({ summary: 'View all swipes (who liked/disliked/complimented who)' })
@@ -219,7 +219,7 @@ export class AdminController {
         return this.adminService.getSwipes(pagination, type);
     }
 
-    // ─── MATCHES ────────────────────────────────────────────
+    // â”€â”€â”€ MATCHES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('matches')
     @ApiOperation({ summary: 'View all matches' })
@@ -227,7 +227,7 @@ export class AdminController {
         return this.adminService.getMatches(pagination);
     }
 
-    // ─── CONVERSATIONS ──────────────────────────────────────
+    // â”€â”€â”€ CONVERSATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('conversations')
     @ApiOperation({ summary: 'View all conversations' })
@@ -244,7 +244,7 @@ export class AdminController {
         return this.adminService.getConversationMessages(conversationId, pagination);
     }
 
-    // ─── REPORTS ────────────────────────────────────────────
+    // â”€â”€â”€ REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('reports')
     @ApiOperation({ summary: 'List all reports (admin only)' })
@@ -265,7 +265,7 @@ export class AdminController {
         return this.adminService.resolveReport(reportId, adminId, dto.status, dto.moderatorNote);
     }
 
-    // ─── PHOTO MODERATION ───────────────────────────────────
+    // â”€â”€â”€ PHOTO MODERATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('photos/pending')
     @ApiOperation({ summary: 'List photos pending moderation' })
@@ -279,7 +279,7 @@ export class AdminController {
         return this.adminService.moderatePhoto(photoId, dto.status, dto.moderationNote);
     }
 
-    // ─── NOTIFICATIONS ──────────────────────────────────────
+    // â”€â”€â”€ NOTIFICATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Post('notifications/send')
     @ApiOperation({ summary: 'Send notification to user or broadcast to all' })
@@ -287,7 +287,7 @@ export class AdminController {
         return this.adminService.sendNotification(dto);
     }
 
-    // ─── SUPPORT TICKETS ────────────────────────────────────
+    // â”€â”€â”€ SUPPORT TICKETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('tickets')
     @ApiOperation({ summary: 'List support tickets' })
@@ -308,7 +308,7 @@ export class AdminController {
         return this.adminService.replyToTicket(ticketId, adminId, dto.reply, dto.status);
     }
 
-    // ─── ADS ────────────────────────────────────────────────
+    // â”€â”€â”€ ADS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('ads')
     @ApiOperation({ summary: 'List all ads' })
@@ -338,7 +338,7 @@ export class AdminController {
         await this.adminService.deleteAd(id);
     }
 
-    // ─── BOOSTS ─────────────────────────────────────────────
+    // â”€â”€â”€ BOOSTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('boosts')
     @ApiOperation({ summary: 'List all profile boosts' })
@@ -346,7 +346,7 @@ export class AdminController {
         return this.adminService.getBoosts(pagination);
     }
 
-    // ─── PLANS ──────────────────────────────────────────────
+    // â”€â”€â”€ PLANS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('plans')
     @ApiOperation({ summary: 'List all subscription plans' })
@@ -386,7 +386,7 @@ export class AdminController {
         return this.adminService.overrideUserSubscription(userId, dto.planId, dto.durationDays);
     }
 
-    // ─── SUBSCRIPTIONS ──────────────────────────────────────
+    // â”€â”€â”€ SUBSCRIPTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('subscriptions')
     @ApiOperation({ summary: 'List all subscriptions with plan breakdown' })
@@ -397,7 +397,7 @@ export class AdminController {
         return this.adminService.getSubscriptions(pagination, plan);
     }
 
-    // ─── ANALYTICS ──────────────────────────────────────────
+    // â”€â”€â”€ ANALYTICS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('stats')
     @ApiOperation({ summary: 'Get dashboard statistics' })
@@ -405,7 +405,7 @@ export class AdminController {
         return this.adminService.getDashboardStats();
     }
 
-    // ─── SYSTEM HEALTH / PERFORMANCE ─────────────────────────
+    // â”€â”€â”€ SYSTEM HEALTH / PERFORMANCE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Roles(UserRole.ADMIN)
     @Get('system/health')
@@ -448,3 +448,4 @@ export class AdminController {
         return { login, admin, suspicious };
     }
 }
+
