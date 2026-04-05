@@ -36,6 +36,20 @@ export class SearchService {
         private readonly redisService: RedisService,
     ) { }
 
+    private static readonly SAFE_PREFERENCE_SELECT = {
+        id: true,
+        userId: true,
+        minAge: true,
+        maxAge: true,
+        preferredGender: true,
+        maxDistance: true,
+        preferredEthnicities: true,
+        preferredNationalities: true,
+        preferredReligiousLevel: true,
+        preferredMaritalStatus: true,
+        preferredInterests: true,
+    } as const;
+
     async search(userId: string, filters: SearchFiltersDto) {
         this.logger.log(
             `[Search] Starting search for userId=${userId}, filters=${JSON.stringify(filters)}`,
@@ -79,7 +93,10 @@ export class SearchService {
                 where: { userId },
                 relations: ['user'],
             }),
-            this.userPreferenceRepository.findOne({ where: { userId } }),
+            this.userPreferenceRepository.findOne({
+                where: { userId },
+                select: SearchService.SAFE_PREFERENCE_SELECT,
+            }),
         ]);
 
         if (!currentProfile) {
@@ -188,6 +205,19 @@ export class SearchService {
             candidateUserIds.length > 0
                 ? this.userPreferenceRepository
                       .createQueryBuilder('preference')
+                      .select([
+                          'preference.id',
+                          'preference.userId',
+                          'preference.minAge',
+                          'preference.maxAge',
+                          'preference.preferredGender',
+                          'preference.maxDistance',
+                          'preference.preferredEthnicities',
+                          'preference.preferredNationalities',
+                          'preference.preferredReligiousLevel',
+                          'preference.preferredMaritalStatus',
+                          'preference.preferredInterests',
+                      ])
                       .where('preference.userId IN (:...candidateUserIds)', {
                           candidateUserIds,
                       })
