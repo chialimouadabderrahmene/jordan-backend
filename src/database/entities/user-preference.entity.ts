@@ -51,11 +51,11 @@ export class UserPreference {
     @Column({ type: 'simple-array', nullable: true })
     preferredInterests: string[];
 
-    @Column({ type: 'simple-array', nullable: true })
-    preferredLanguages: string[];
+    // Legacy preference fields are intentionally not mapped because the
+    // production database does not currently have these columns.
+    preferredLanguages?: string[];
 
-    @Column({ type: 'simple-array', nullable: true })
-    preferredFamilyValues: string[];
+    preferredFamilyValues?: string[];
 
     @CreateDateColumn()
     createdAt: Date;
