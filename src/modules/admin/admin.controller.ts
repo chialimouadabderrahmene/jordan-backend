@@ -25,8 +25,18 @@ import { PhotoModerationStatus } from '../../database/entities/photo.entity';
 import { LikeType } from '../../database/entities/like.entity';
 import { TicketStatus } from '../../database/entities/support-ticket.entity';
 import { PaginationDto } from '../../common/dto/pagination.dto';
-import { IsEnum, IsOptional, IsString, IsEmail, IsBoolean, MinLength } from 'class-validator';
+import {
+    IsEnum,
+    IsOptional,
+    IsString,
+    IsEmail,
+    IsBoolean,
+    MinLength,
+    IsDateString,
+    IsObject,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { VerificationStatus } from '../../database/entities/user.entity';
 
 class UpdateUserStatusDto {
     @ApiProperty({ enum: UserStatus })
@@ -70,6 +80,8 @@ class SendNotificationDto {
     @ApiProperty() @IsString() title: string;
     @ApiProperty() @IsString() body: string;
     @ApiPropertyOptional() @IsOptional() @IsString() type?: string;
+    @ApiPropertyOptional() @IsOptional() @IsString() conversationId?: string;
+    @ApiPropertyOptional({ type: Object }) @IsOptional() @IsObject() extraData?: Record<string, any>;
     @ApiPropertyOptional() @IsOptional() @IsBoolean() broadcast?: boolean;
 }
 
@@ -78,10 +90,31 @@ class ReplyTicketDto {
     @ApiPropertyOptional({ enum: TicketStatus }) @IsOptional() @IsEnum(TicketStatus) status?: TicketStatus;
 }
 
+class SetUserPremiumDto {
+    @ApiProperty()
+    @IsDateString()
+    startDate: string;
+
+    @ApiProperty()
+    @IsDateString()
+    expiryDate: string;
+}
+
+class VerificationModerationDto {
+    @ApiProperty({ enum: VerificationStatus })
+    @IsEnum(VerificationStatus)
+    status: VerificationStatus;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    rejectionReason?: string;
+}
+
 @ApiTags('admin')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.MODERATOR)
+@Roles(UserRole.ADMIN)
 @Controller('admin')
 export class AdminController {
     constructor(
@@ -104,6 +137,16 @@ export class AdminController {
     }
 
     @Roles(UserRole.ADMIN)
+    @Get('users/search')
+    @ApiOperation({ summary: 'Search users by name, email, or userId' })
+    async searchUsers(
+        @Query() pagination: PaginationDto,
+        @Query('query') query?: string,
+    ) {
+        return this.adminService.searchUsers(query || '', pagination);
+    }
+
+    @Roles(UserRole.ADMIN)
     @Post('users')
     @ApiOperation({ summary: 'Create a new user (admin)' })
     async createUser(@Body() dto: CreateUserDto) {
@@ -122,12 +165,14 @@ export class AdminController {
         return this.adminService.getUserActivity(userId);
     }
 
+    @Patch('users/:id')
     @Put('users/:id')
     @ApiOperation({ summary: 'Update user fields' })
     async updateUser(@Param('id') userId: string, @Body() dto: any) {
         return this.adminService.updateUser(userId, dto);
     }
 
+    @Roles(UserRole.ADMIN)
     @Patch('users/:id/status')
     @ApiOperation({ summary: 'Update user status (ban/suspend/activate)' })
     async updateUserStatus(
@@ -145,12 +190,108 @@ export class AdminController {
         return this.adminService.updateUserStatus(userId, dto.status);
     }
 
+    @Roles(UserRole.ADMIN)
+    @Post('users/:id/premium')
+    @ApiOperation({ summary: 'Set user premium access manually' })
+    async setUserPremium(
+        @CurrentUser('sub') adminId: string,
+        @Param('id') userId: string,
+        @Body() dto: SetUserPremiumDto,
+    ) {
+        this.redisService.appendAuditLog({
+            type: 'admin',
+            adminId,
+            action: 'set_user_premium',
+            targetUserId: userId,
+            startDate: dto.startDate,
+            expiryDate: dto.expiryDate,
+        }).catch(() => {});
+
+        return this.adminService.setUserPremium(
+            userId,
+            new Date(dto.startDate),
+            new Date(dto.expiryDate),
+        );
+    }
+
+    @Roles(UserRole.ADMIN)
+    @Delete('users/:id/premium')
+    @ApiOperation({ summary: 'Remove user premium access manually' })
+    async removeUserPremium(
+        @CurrentUser('sub') adminId: string,
+        @Param('id') userId: string,
+    ) {
+        this.redisService.appendAuditLog({
+            type: 'admin',
+            adminId,
+            action: 'remove_user_premium',
+            targetUserId: userId,
+        }).catch(() => {});
+
+        return this.adminService.removeUserPremium(userId);
+    }
+
+    @Roles(UserRole.ADMIN)
+    @Patch('users/:id/verification/selfie')
+    @ApiOperation({ summary: 'Approve or reject selfie verification' })
+    async verifySelfie(
+        @CurrentUser('sub') adminId: string,
+        @Param('id') userId: string,
+        @Body() dto: VerificationModerationDto,
+    ) {
+        this.redisService.appendAuditLog({
+            type: 'admin',
+            adminId,
+            action: 'verify_selfie',
+            targetUserId: userId,
+            status: dto.status,
+        }).catch(() => {});
+
+        return this.adminService.verifySelfie(
+            userId,
+            dto.status,
+            adminId,
+            dto.rejectionReason,
+        );
+    }
+
+    @Roles(UserRole.ADMIN)
+    @Patch('users/:id/verification/marital-status')
+    @ApiOperation({ summary: 'Approve or reject marital-status verification' })
+    async verifyMaritalStatus(
+        @CurrentUser('sub') adminId: string,
+        @Param('id') userId: string,
+        @Body() dto: VerificationModerationDto,
+    ) {
+        this.redisService.appendAuditLog({
+            type: 'admin',
+            adminId,
+            action: 'verify_marital_status',
+            targetUserId: userId,
+            status: dto.status,
+        }).catch(() => {});
+
+        return this.adminService.verifyMaritalStatus(
+            userId,
+            dto.status,
+            adminId,
+            dto.rejectionReason,
+        );
+    }
+
     // â”€â”€â”€ DOCUMENT VERIFICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Get('documents/pending')
     @ApiOperation({ summary: 'Get all users with pending document verification' })
     async getPendingDocuments() {
         return this.adminService.getPendingDocuments();
+    }
+
+    @Roles(UserRole.ADMIN)
+    @Get('verifications/pending')
+    @ApiOperation({ summary: 'Get all users with pending selfie or marital-status verification' })
+    async getPendingVerifications() {
+        return this.adminService.getPendingVerifications();
     }
 
     @Patch('documents/:userId/verify')
@@ -283,7 +424,18 @@ export class AdminController {
 
     @Post('notifications/send')
     @ApiOperation({ summary: 'Send notification to user or broadcast to all' })
-    async sendNotification(@Body() dto: SendNotificationDto) {
+    async sendNotification(
+        @CurrentUser('sub') adminId: string,
+        @Body() dto: SendNotificationDto,
+    ) {
+        this.redisService.appendAuditLog({
+            type: 'admin',
+            adminId,
+            action: 'send_notification',
+            targetUserId: dto.userId,
+            notificationType: dto.type,
+            broadcast: dto.broadcast ?? false,
+        }).catch(() => {});
         return this.adminService.sendNotification(dto);
     }
 
@@ -305,6 +457,13 @@ export class AdminController {
         @Param('id') ticketId: string,
         @Body() dto: ReplyTicketDto,
     ) {
+        this.redisService.appendAuditLog({
+            type: 'admin',
+            adminId,
+            action: 'reply_ticket',
+            ticketId,
+            status: dto.status,
+        }).catch(() => {});
         return this.adminService.replyToTicket(ticketId, adminId, dto.reply, dto.status);
     }
 

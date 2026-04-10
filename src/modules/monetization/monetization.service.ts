@@ -65,6 +65,14 @@ export class MonetizationService {
 
         if (sub && sub.endDate && new Date(sub.endDate) < new Date()) {
             await this.subscriptionRepository.update(sub.id, { status: SubscriptionStatus.EXPIRED });
+            await this.userRepository.update(userId, {
+                isPremium: false,
+                premiumStartDate: null,
+                premiumExpiryDate: null,
+            });
+            await this.redisService.del(`premium:${userId}`);
+            await this.redisService.del(`plan:${userId}`);
+            await this.redisService.del(`features:${userId}`);
             return this.planRepository.findOne({ where: { name: 'BASIC' } });
         }
 
@@ -122,9 +130,16 @@ export class MonetizationService {
 
         const saved = await this.subscriptionRepository.save(sub);
 
+        await this.userRepository.update(userId, {
+            isPremium: true,
+            premiumStartDate: startDate,
+            premiumExpiryDate: endDate,
+        });
+
         // Invalidate cache
         await this.redisService.del(`plan:${userId}`);
         await this.redisService.del(`features:${userId}`);
+        await this.redisService.del(`premium:${userId}`);
 
         this.logger.log(`User ${userId} purchased plan ${planEntity.name} for ${durationDays} days`);
         return saved;

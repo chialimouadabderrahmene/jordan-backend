@@ -4,12 +4,14 @@ import { Repository } from 'typeorm';
 import { SupportTicket, TicketStatus } from '../../database/entities/support-ticket.entity';
 import { CreateSupportTicketDto, UpdateTicketStatusDto, CreateFeedbackDto } from './dto/support.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class SupportService {
     constructor(
         @InjectRepository(SupportTicket)
         private readonly ticketRepository: Repository<SupportTicket>,
+        private readonly notificationsService: NotificationsService,
     ) { }
 
     async createTicket(userId: string, dto: CreateSupportTicketDto): Promise<SupportTicket> {
@@ -64,7 +66,18 @@ export class SupportService {
             ticket.adminReply = dto.adminReply;
             ticket.repliedAt = new Date();
         }
-        return this.ticketRepository.save(ticket);
+        const savedTicket = await this.ticketRepository.save(ticket);
+
+        if (dto.adminReply) {
+            await this.notificationsService.sendTicketNotification(
+                ticket.userId,
+                'Support Reply',
+                `Your ticket "${ticket.subject}" has been answered.`,
+                { ticketId: ticket.id, status: ticket.status },
+            );
+        }
+
+        return savedTicket;
     }
 
     async getTicketStats() {

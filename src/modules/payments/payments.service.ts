@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Subscription, SubscriptionPlan, SubscriptionStatus } from '../../database/entities/subscription.entity';
 import { User } from '../../database/entities/user.entity';
 import Stripe from 'stripe';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 export enum PaymentProvider {
     STRIPE = 'stripe',
@@ -52,6 +53,7 @@ export class PaymentsService {
         private readonly subscriptionRepository: Repository<Subscription>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        private readonly subscriptionsService: SubscriptionsService,
     ) {
         const stripeKey = this.configService.get<string>('STRIPE_SECRET_KEY');
         if (stripeKey) {
@@ -269,6 +271,7 @@ export class PaymentsService {
             await this.subscriptionRepository.save(existingSub);
         }
 
+        await this.subscriptionsService.syncUserPremiumState(finalUserId);
         this.logger.log(`Subscription activated for user ${finalUserId}`);
     }
 
@@ -286,6 +289,7 @@ export class PaymentsService {
                 { userId: finalUserId, status: SubscriptionStatus.ACTIVE },
                 { status: SubscriptionStatus.EXPIRED },
             );
+            await this.subscriptionsService.syncUserPremiumState(finalUserId);
         }
     }
 
@@ -302,12 +306,14 @@ export class PaymentsService {
                 { userId: finalUserId },
                 { status: SubscriptionStatus.CANCELLED },
             );
+            await this.subscriptionsService.syncUserPremiumState(finalUserId);
             this.logger.log(`Subscription cancelled for user ${finalUserId}`);
         } else if (subscription.status === 'active') {
              await this.subscriptionRepository.update(
                 { userId: finalUserId },
                 { status: SubscriptionStatus.ACTIVE, stripeSubscriptionId: subscription.id },
             );
+            await this.subscriptionsService.syncUserPremiumState(finalUserId);
         }
     }
 

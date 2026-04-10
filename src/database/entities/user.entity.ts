@@ -20,10 +20,69 @@ export enum UserRole {
 
 export enum UserStatus {
     ACTIVE = 'active',
+    REJECTED = 'rejected',
     SUSPENDED = 'suspended',
     BANNED = 'banned',
     DEACTIVATED = 'deactivated',
     PENDING_VERIFICATION = 'pending_verification',
+}
+
+export enum VerificationStatus {
+    NOT_UPLOADED = 'not_uploaded',
+    PENDING = 'pending',
+    APPROVED = 'approved',
+    REJECTED = 'rejected',
+}
+
+export interface UserVerificationItem {
+    status: VerificationStatus;
+    url: string | null;
+    rejectionReason: string | null;
+    submittedAt: string | null;
+    reviewedAt: string | null;
+    reviewedBy: string | null;
+}
+
+export interface UserVerificationState {
+    selfie: UserVerificationItem;
+    marital_status: UserVerificationItem;
+}
+
+export function createVerificationItem(
+    status: VerificationStatus = VerificationStatus.NOT_UPLOADED,
+): UserVerificationItem {
+    return {
+        status,
+        url: null,
+        rejectionReason: null,
+        submittedAt: null,
+        reviewedAt: null,
+        reviewedBy: null,
+    };
+}
+
+export function createDefaultVerificationState(): UserVerificationState {
+    return {
+        selfie: createVerificationItem(),
+        marital_status: createVerificationItem(),
+    };
+}
+
+export function normalizeVerificationState(
+    verification?: Partial<UserVerificationState> | null,
+): UserVerificationState {
+    const defaults = createDefaultVerificationState();
+
+    return {
+        selfie: {
+            ...defaults.selfie,
+            ...(verification?.selfie ?? {}),
+        },
+        marital_status: {
+            ...defaults.marital_status,
+            ...(verification?.marital_status ?? {}),
+        },
+    };
 }
 
 @Entity('users')
@@ -57,6 +116,18 @@ export class User {
 
     @Column({ type: 'enum', enum: UserStatus, default: UserStatus.PENDING_VERIFICATION })
     status: UserStatus;
+
+    @Column({ default: false })
+    isPremium: boolean;
+
+    @Column({ type: 'timestamptz', nullable: true })
+    premiumStartDate: Date | null;
+
+    @Column({ type: 'timestamptz', nullable: true })
+    premiumExpiryDate: Date | null;
+
+    @Column({ type: 'jsonb', nullable: true, default: () => "'{}'" })
+    verification: UserVerificationState;
 
     @Column({ nullable: true, select: false })
     refreshToken: string;

@@ -9,7 +9,11 @@ import { Repository } from 'typeorm';
 import { Like, LikeType } from '../../database/entities/like.entity';
 import { Match, MatchStatus } from '../../database/entities/match.entity';
 import { BlockedUser } from '../../database/entities/blocked-user.entity';
-import { Subscription, SubscriptionPlan } from '../../database/entities/subscription.entity';
+import {
+    Subscription,
+    SubscriptionPlan,
+    SubscriptionStatus,
+} from '../../database/entities/subscription.entity';
 import { Profile } from '../../database/entities/profile.entity';
 import { UserPreference } from '../../database/entities/user-preference.entity';
 import { Conversation } from '../../database/entities/conversation.entity';
@@ -361,7 +365,19 @@ export class SwipesService {
         const subscription = await this.subscriptionRepository.findOne({
             where: { userId, status: 'active' as any },
         });
-        const isPremium = !!subscription && subscription.plan !== SubscriptionPlan.FREE;
+        let isPremium = !!subscription && subscription.plan !== SubscriptionPlan.FREE;
+
+        if (
+            isPremium &&
+            subscription?.endDate &&
+            new Date(subscription.endDate) <= new Date()
+        ) {
+            await this.subscriptionRepository.update(subscription.id, {
+                status: SubscriptionStatus.EXPIRED,
+            });
+            isPremium = false;
+        }
+
         await this.redisService.set(cacheKey, isPremium ? '1' : '0', 300); // 5 min TTL
         return isPremium;
     }

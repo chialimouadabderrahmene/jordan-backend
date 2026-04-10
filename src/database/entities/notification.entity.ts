@@ -15,6 +15,7 @@ export enum NotificationType {
     LIKE = 'like',
     SYSTEM = 'system',
     SUBSCRIPTION = 'subscription',
+    TICKET = 'ticket',
     PROFILE_VIEW = 'profile_view',
     VERIFICATION = 'verification',
 }
