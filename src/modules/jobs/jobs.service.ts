@@ -14,6 +14,7 @@ import { Conversation } from '../../database/entities/conversation.entity';
 import { Subscription, SubscriptionPlan, SubscriptionStatus } from '../../database/entities/subscription.entity';
 import { RematchRequest, RematchStatus } from '../../database/entities/rematch-request.entity';
 import { RedisService } from '../redis/redis.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class JobsService {
@@ -43,7 +44,17 @@ export class JobsService {
         @InjectRepository(RematchRequest)
         private readonly rematchRepository: Repository<RematchRequest>,
         private readonly redisService: RedisService,
+        private readonly subscriptionsService: SubscriptionsService,
     ) { }
+
+    @Cron(CronExpression.EVERY_10_MINUTES)
+    async expirePremiumSubscriptions(): Promise<void> {
+        const expiredUserIds = await this.subscriptionsService.expirePremiums();
+
+        if (expiredUserIds.length > 0) {
+            this.logger.log(`Expired premium access for ${expiredUserIds.length} user(s)`);
+        }
+    }
 
     // ─── DEACTIVATE EXPIRED BOOSTS (every 5 minutes) ────────
 

@@ -14,12 +14,14 @@ import { Conversation } from '../../database/entities/conversation.entity';
 import { Subscription } from '../../database/entities/subscription.entity';
 import { RematchRequest } from '../../database/entities/rematch-request.entity';
 import { RedisModule } from '../redis/redis.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
     imports: [
         ScheduleModule.forRoot(),
         TypeOrmModule.forFeature([User, UserBehavior, Boost, AnalyticsEvent, Profile, Like, Match, Message, Conversation, Subscription, RematchRequest]),
         RedisModule,
+        SubscriptionsModule,
     ],
     providers: [JobsService],
     exports: [JobsService],

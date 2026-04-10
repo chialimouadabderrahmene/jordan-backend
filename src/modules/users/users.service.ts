@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User, UserStatus } from '../../database/entities/user.entity';
+import {
+    User,
+    UserStatus,
+    normalizeVerificationState,
+} from '../../database/entities/user.entity';
 import { Profile } from '../../database/entities/profile.entity';
 import { Photo, PhotoModerationStatus } from '../../database/entities/photo.entity';
 import { Like, LikeType } from '../../database/entities/like.entity';
@@ -37,6 +41,10 @@ export class UsersService {
         phone: true,
         role: true,
         status: true,
+        isPremium: true,
+        premiumStartDate: true,
+        premiumExpiryDate: true,
+        verification: true,
         emailVerified: true,
         selfieVerified: true,
         selfieUrl: true,
@@ -81,7 +89,7 @@ export class UsersService {
             select: UsersService.SAFE_USER_SELECT,
         });
         if (!user) throw new NotFoundException('User not found');
-        return user;
+        return this.normalizeUserState(user);
     }
 
     async findByEmail(email: string): Promise<User> {
@@ -112,7 +120,7 @@ export class UsersService {
         ]);
 
         return {
-            ...user,
+            ...this.normalizeUserState(user),
             profile: profile || null,
             photos: photos || [],
             sentComplimentsCount,
@@ -246,5 +254,12 @@ export class UsersService {
             return true;
         }
         return false;
+    }
+
+    private normalizeUserState(user: User): User {
+        return {
+            ...user,
+            verification: normalizeVerificationState(user.verification),
+        };
     }
 }

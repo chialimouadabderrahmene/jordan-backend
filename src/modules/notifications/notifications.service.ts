@@ -30,7 +30,7 @@ type PushEligibleUser = Pick<
 
 type NormalizedNotificationPayload = {
     storedType: NotificationType;
-    data?: Record<string, any>;
+    data: Record<string, any>;
 };
 
 @Injectable()
@@ -52,13 +52,16 @@ export class NotificationsService {
     async createNotification(
         userId: string,
         data: {
+            userId?: string;
+            conversationId?: string;
+            extraData?: Record<string, any>;
             type: string;
             title: string;
             body: string;
             data?: Record<string, any>;
         },
     ): Promise<Notification> {
-        const normalized = this.normalizeNotificationPayload(data);
+        const normalized = this.normalizeNotificationPayload(userId, data);
         const notification = this.notificationRepository.create({
             userId,
             type: normalized.storedType,
@@ -121,23 +124,60 @@ export class NotificationsService {
         } as any);
     }
 
-    private normalizeNotificationPayload(data: {
-        type: string;
-        title: string;
-        body: string;
-        data?: Record<string, any>;
-    }): NormalizedNotificationPayload {
+    private normalizeNotificationPayload(
+        targetUserId: string,
+        data: {
+            userId?: string;
+            conversationId?: string;
+            extraData?: Record<string, any>;
+            type: string;
+            title: string;
+            body: string;
+            data?: Record<string, any>;
+        },
+    ): NormalizedNotificationPayload {
         const clientType = (data.type || NotificationType.SYSTEM).trim().toLowerCase();
         const storedType = this.mapNotificationTypeForStorage(clientType);
         const payloadData = { ...(data.data ?? {}) };
+        const conversationId =
+            data.conversationId?.toString().trim() ||
+            payloadData.conversationId?.toString().trim() ||
+            null;
+
+        delete payloadData.conversationId;
+
+        const payloadUserId =
+            data.userId?.toString().trim() ||
+            payloadData.userId?.toString().trim() ||
+            payloadData.senderId?.toString().trim() ||
+            payloadData.likerId?.toString().trim() ||
+            payloadData.requesterId?.toString().trim() ||
+            targetUserId;
+
+        delete payloadData.userId;
+        delete payloadData.senderId;
+        delete payloadData.likerId;
+        delete payloadData.requesterId;
+
+        const extraData = {
+            ...(data.extraData ?? {}),
+            ...payloadData,
+        };
 
         if (clientType !== storedType) {
-            payloadData.notificationType = clientType;
+            extraData.originalType = clientType;
         }
 
         return {
             storedType,
-            data: Object.keys(payloadData).length > 0 ? payloadData : undefined,
+            data: {
+                payload: {
+                    type: clientType,
+                    userId: payloadUserId,
+                    conversationId,
+                    extraData,
+                },
+            },
         };
     }
 
@@ -153,6 +193,10 @@ export class NotificationsService {
                 return NotificationType.LIKE;
             case NotificationType.SUBSCRIPTION:
                 return NotificationType.SUBSCRIPTION;
+            case NotificationType.TICKET:
+            case 'support':
+            case 'support_reply':
+                return NotificationType.TICKET;
             case NotificationType.PROFILE_VIEW:
                 return NotificationType.PROFILE_VIEW;
             case NotificationType.VERIFICATION:
@@ -163,7 +207,10 @@ export class NotificationsService {
     }
 
     private resolveClientNotificationType(notification: Notification): string {
-        const rawType = notification.data?.notificationType ?? notification.type;
+        const rawType =
+            notification.data?.payload?.type ??
+            notification.data?.notificationType ??
+            notification.type;
         return rawType?.toString().trim().toLowerCase() || NotificationType.SYSTEM;
     }
 
@@ -232,6 +279,8 @@ export class NotificationsService {
             case 'super_like':
             case 'compliment':
                 return user.likeNotifications;
+            case NotificationType.TICKET:
+                return true;
             case NotificationType.PROFILE_VIEW:
                 return user.profileVisitorNotifications;
             case NotificationType.VERIFICATION:
@@ -274,7 +323,8 @@ export class NotificationsService {
                 notificationId: notification.id,
                 type: clientType,
                 createdAt,
-                ...(notification.data ?? {}),
+                ...(notification.data?.payload ?? {}),
+                extraData: notification.data?.payload?.extraData ?? {},
             }),
         };
     }
@@ -609,6 +659,34 @@ export class NotificationsService {
             type: 'message',
             title: `New message from ${senderName}`,
             body: preview.length > 80 ? preview.substring(0, 80) + '...' : preview,
+            data,
+        });
+    }
+
+    async sendSubscriptionNotification(
+        userId: string,
+        title: string,
+        body: string,
+        data?: Record<string, any>,
+    ): Promise<Notification> {
+        return this.createNotification(userId, {
+            type: 'subscription',
+            title,
+            body,
+            data,
+        });
+    }
+
+    async sendTicketNotification(
+        userId: string,
+        title: string,
+        body: string,
+        data?: Record<string, any>,
+    ): Promise<Notification> {
+        return this.createNotification(userId, {
+            type: 'ticket',
+            title,
+            body,
             data,
         });
     }

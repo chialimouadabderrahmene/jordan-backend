@@ -5,11 +5,13 @@ import { Subscription } from '../../database/entities/subscription.entity';
 import { User } from '../../database/entities/user.entity';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([Subscription, User]),
         ConfigModule,
+        SubscriptionsModule,
     ],
     controllers: [PaymentsController],
     providers: [PaymentsService],

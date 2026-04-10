@@ -2,7 +2,13 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike, Not, IsNull } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User, UserRole, UserStatus } from '../../database/entities/user.entity';
+import {
+    User,
+    UserRole,
+    UserStatus,
+    VerificationStatus,
+    normalizeVerificationState,
+} from '../../database/entities/user.entity';
 import { Report, ReportStatus } from '../../database/entities/report.entity';
 import { Profile } from '../../database/entities/profile.entity';
 import { Match } from '../../database/entities/match.entity';
@@ -19,6 +25,8 @@ import { BlockedUser } from '../../database/entities/blocked-user.entity';
 import { Plan } from '../../database/entities/plan.entity';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { RedisService } from '../redis/redis.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -56,6 +64,8 @@ export class AdminService implements OnModuleInit {
         @InjectRepository(Plan)
         private readonly planRepository: Repository<Plan>,
         private readonly redisService: RedisService,
+        private readonly notificationsService: NotificationsService,
+        private readonly subscriptionsService: SubscriptionsService,
     ) { }
 
     // â”€â”€â”€ AUTO-SEED ADMIN ON STARTUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -107,8 +117,8 @@ export class AdminService implements OnModuleInit {
         if (role) qb.andWhere('user.role = :role', { role });
         if (search) {
             qb.andWhere(
-                '(user.firstName ILIKE :search OR user.lastName ILIKE :search OR user.email ILIKE :search OR user.username ILIKE :search)',
-                { search: `%${search}%` },
+                '(user.id::text = :exactSearch OR user.firstName ILIKE :likeSearch OR user.lastName ILIKE :likeSearch OR CONCAT(user.firstName, \' \', user.lastName) ILIKE :likeSearch OR user.email ILIKE :likeSearch OR user.username ILIKE :likeSearch)',
+                { exactSearch: search.trim(), likeSearch: `%${search.trim()}%` },
             );
         }
         if (plan) {
@@ -120,24 +130,38 @@ export class AdminService implements OnModuleInit {
             .take(pagination.limit);
 
         const [users, total] = await qb.getManyAndCount();
-        return { users, total, page: pagination.page, limit: pagination.limit };
+        return {
+            users: users.map((user) => this.normalizeUserState(user)),
+            total,
+            page: pagination.page,
+            limit: pagination.limit,
+        };
     }
 
     async getUserDetail(userId: string) {
+        await this.subscriptionsService.syncUserPremiumState(userId);
         const user = await this.userRepository.findOne({ where: { id: userId } });
         if (!user) throw new NotFoundException('User not found');
 
         const profile = await this.profileRepository.findOne({ where: { userId } });
         const photos = await this.photoRepository.find({ where: { userId } });
-        const subscription = await this.subscriptionRepository.findOne({ where: { userId } });
+        const subscription = await this.subscriptionRepository.findOne({
+            where: { userId },
+            order: { createdAt: 'DESC' },
+        });
 
-        return { user, profile, photos, subscription };
+        return {
+            user: this.normalizeUserState(user),
+            profile,
+            photos,
+            subscription,
+        };
     }
 
     // â”€â”€â”€ DOCUMENT VERIFICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async getPendingDocuments() {
-        return this.userRepository.find({
+        const users = await this.userRepository.find({
             where: {
                 documentUrl: Not(IsNull()),
                 documentVerified: false,
@@ -145,6 +169,8 @@ export class AdminService implements OnModuleInit {
             },
             order: { createdAt: 'DESC' },
         });
+
+        return users.map((user) => this.normalizeUserState(user));
     }
 
     async verifyDocument(userId: string, approved: boolean, rejectionReason?: string) {
@@ -173,24 +199,21 @@ export class AdminService implements OnModuleInit {
             0,
         );
 
-        await this.notificationRepository.save(
-            this.notificationRepository.create({
-                userId,
-                type: NotificationType.VERIFICATION,
-                title: approved ? 'Identity verified' : 'Reverify your identity',
-                body: approved
-                    ? 'Your identity document has been approved by the Methna team.'
-                    : reverifyMessage,
-                data: {
-                    status: approved ? 'verified' : 'reverify_required',
-                    documentType: user.documentType ?? null,
-                    rejectionReason: approved ? null : reverifyMessage,
-                },
-            }),
-        );
+        await this.notificationsService.createNotification(userId, {
+            type: 'verification',
+            title: approved ? 'Identity verified' : 'Reverify your identity',
+            body: approved
+                ? 'Your identity document has been approved by the Methna team.'
+                : reverifyMessage,
+            data: {
+                documentType: user.documentType ?? null,
+                status: approved ? 'approved' : 'rejected',
+                rejectionReason: approved ? null : reverifyMessage,
+            },
+        });
 
         this.logger.log(`Admin ${approved ? 'approved' : 'requested reverify for'} identity document of user ${userId}`);
-        return savedUser;
+        return this.normalizeUserState(savedUser);
     }
 
     async autoApproveDocuments() {
@@ -242,11 +265,13 @@ export class AdminService implements OnModuleInit {
             matchNotifications: true,
             messageNotifications: true,
             likeNotifications: true,
+            isPremium: false,
+            verification: normalizeVerificationState(null),
         });
 
-        await this.userRepository.save(user);
+        const savedUser = await this.userRepository.save(user);
         this.logger.log(`Admin created user: ${dto.email}`);
-        return user;
+        return this.normalizeUserState(savedUser);
     }
 
     // â”€â”€â”€ UPDATE USER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -257,8 +282,12 @@ export class AdminService implements OnModuleInit {
 
         delete (dto as any).password;
         delete (dto as any).id;
+        if (dto.verification !== undefined) {
+            dto.verification = normalizeVerificationState(dto.verification);
+        }
         Object.assign(user, dto);
-        return this.userRepository.save(user);
+        const savedUser = await this.userRepository.save(user);
+        return this.normalizeUserState(savedUser);
     }
 
     // â”€â”€â”€ PER-USER ACTIVITY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -362,7 +391,13 @@ export class AdminService implements OnModuleInit {
     // â”€â”€â”€ SEND NOTIFICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async sendNotification(dto: {
-        userId?: string; title: string; body: string; type?: string; broadcast?: boolean;
+        userId?: string;
+        title: string;
+        body: string;
+        type?: string;
+        conversationId?: string;
+        extraData?: Record<string, any>;
+        broadcast?: boolean;
     }) {
         if (dto.broadcast) {
             const users = await this.userRepository.find({
@@ -375,6 +410,12 @@ export class AdminService implements OnModuleInit {
                     type: (dto.type as NotificationType) || NotificationType.SYSTEM,
                     title: dto.title,
                     body: dto.body,
+                    data: this.buildNotificationPayload(
+                        dto.type || NotificationType.SYSTEM,
+                        u.id,
+                        dto.conversationId,
+                        dto.extraData || {},
+                    ),
                 }),
             );
             await this.notificationRepository.save(notifications);
@@ -382,14 +423,14 @@ export class AdminService implements OnModuleInit {
         }
 
         if (!dto.userId) throw new BadRequestException('userId required for non-broadcast');
-        const notif = this.notificationRepository.create({
-            userId: dto.userId,
-            type: (dto.type as NotificationType) || NotificationType.SYSTEM,
+        const notification = await this.notificationsService.createNotification(dto.userId, {
+            type: dto.type || NotificationType.SYSTEM,
             title: dto.title,
             body: dto.body,
+            conversationId: dto.conversationId,
+            extraData: dto.extraData,
         });
-        await this.notificationRepository.save(notif);
-        return { sent: 1, notification: notif };
+        return { sent: 1, notification };
     }
 
     // â”€â”€â”€ SUPPORT TICKETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -420,13 +461,11 @@ export class AdminService implements OnModuleInit {
         await this.ticketRepository.save(ticket);
 
         // Also send notification to user
-        await this.notificationRepository.save(
-            this.notificationRepository.create({
-                userId: ticket.userId,
-                type: NotificationType.SYSTEM,
-                title: 'Support Reply',
-                body: `Your ticket "${ticket.subject}" has been answered.`,
-            }),
+        await this.notificationsService.sendTicketNotification(
+            ticket.userId,
+            'Support Reply',
+            `Your ticket "${ticket.subject}" has been answered.`,
+            { ticketId: ticket.id, status: ticket.status },
         );
 
         return ticket;
@@ -521,7 +560,9 @@ export class AdminService implements OnModuleInit {
             paymentReference: 'ADMIN_OVERRIDE',
         });
 
-        return this.subscriptionRepository.save(sub);
+        const savedSubscription = await this.subscriptionRepository.save(sub);
+        await this.subscriptionsService.syncUserPremiumState(userId);
+        return savedSubscription;
     }
 
     // â”€â”€â”€ SUBSCRIPTIONS OVERVIEW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -548,8 +589,115 @@ export class AdminService implements OnModuleInit {
     }
 
     async updateUserStatus(userId: string, status: UserStatus): Promise<User | null> {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
         await this.userRepository.update(userId, { status });
-        return this.userRepository.findOne({ where: { id: userId } });
+
+        if (status !== UserStatus.ACTIVE) {
+            await this.redisService.invalidateAllUserSessions(userId);
+        }
+
+        const updatedUser = await this.userRepository.findOne({ where: { id: userId } });
+        return updatedUser ? this.normalizeUserState(updatedUser) : null;
+    }
+
+    async searchUsers(query: string, pagination: PaginationDto) {
+        return this.getUsers(pagination, undefined, query);
+    }
+
+    async getPendingVerifications() {
+        const pendingStatus = VerificationStatus.PENDING;
+        const fallbackStatus = VerificationStatus.NOT_UPLOADED;
+        const users = await this.userRepository
+            .createQueryBuilder('user')
+            .where(
+                '(COALESCE(user.verification->\'selfie\'->>\'status\', :fallbackStatus) = :pendingStatus OR (user."selfieUrl" IS NOT NULL AND user."selfieVerified" = false))',
+                { pendingStatus, fallbackStatus },
+            )
+            .orWhere(
+                'COALESCE(user.verification->\'marital_status\'->>\'status\', :fallbackStatus) = :pendingStatus',
+                { pendingStatus, fallbackStatus },
+            )
+            .orderBy('user.createdAt', 'DESC')
+            .getMany();
+
+        return users.map((user) => this.normalizeUserState(user));
+    }
+
+    async setUserPremium(userId: string, startDate: Date, expiryDate: Date) {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const subscription = await this.subscriptionsService.setManualPremium(
+            userId,
+            startDate,
+            expiryDate,
+        );
+
+        await this.notificationsService.sendSubscriptionNotification(
+            userId,
+            'Premium activated',
+            'Your premium subscription has been activated by the Methna team.',
+            {
+                premiumStartDate: startDate.toISOString(),
+                premiumExpiryDate: expiryDate.toISOString(),
+            },
+        );
+
+        const updatedUser = await this.userRepository.findOne({ where: { id: userId } });
+
+        return {
+            user: updatedUser ? this.normalizeUserState(updatedUser) : null,
+            subscription,
+        };
+    }
+
+    async removeUserPremium(userId: string) {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        await this.subscriptionsService.removePremium(userId);
+
+        await this.notificationsService.sendSubscriptionNotification(
+            userId,
+            'Premium removed',
+            'Your premium subscription has been removed by the Methna team.',
+            {},
+        );
+
+        const updatedUser = await this.userRepository.findOne({ where: { id: userId } });
+        return updatedUser ? this.normalizeUserState(updatedUser) : null;
+    }
+
+    async verifySelfie(
+        userId: string,
+        status: VerificationStatus,
+        adminId: string,
+        rejectionReason?: string,
+    ) {
+        return this.updateVerificationState(
+            userId,
+            'selfie',
+            status,
+            adminId,
+            rejectionReason,
+        );
+    }
+
+    async verifyMaritalStatus(
+        userId: string,
+        status: VerificationStatus,
+        adminId: string,
+        rejectionReason?: string,
+    ) {
+        return this.updateVerificationState(
+            userId,
+            'marital_status',
+            status,
+            adminId,
+            rejectionReason,
+        );
     }
 
     async deleteUserAccount(userId: string): Promise<void> {
@@ -627,6 +775,7 @@ export class AdminService implements OnModuleInit {
         const [
             totalUsers,
             activeUsers,
+            rejectedUsers,
             suspendedUsers,
             bannedUsers,
             pendingVerification,
@@ -647,6 +796,7 @@ export class AdminService implements OnModuleInit {
         ] = await Promise.all([
             this.userRepository.count(),
             this.userRepository.count({ where: { status: UserStatus.ACTIVE } }),
+            this.userRepository.count({ where: { status: UserStatus.REJECTED } }),
             this.userRepository.count({ where: { status: UserStatus.SUSPENDED } }),
             this.userRepository.count({ where: { status: UserStatus.BANNED } }),
             this.userRepository.count({ where: { status: UserStatus.PENDING_VERIFICATION } }),
@@ -654,12 +804,7 @@ export class AdminService implements OnModuleInit {
             this.matchRepository.count(),
             this.reportRepository.count({ where: { status: ReportStatus.PENDING } }),
             this.reportRepository.count({ where: { status: ReportStatus.RESOLVED } }),
-            this.subscriptionRepository.count({
-                where: [
-                    { plan: SubscriptionPlan.PREMIUM, status: 'active' as any },
-                    { plan: SubscriptionPlan.GOLD, status: 'active' as any },
-                ],
-            }),
+            this.userRepository.count({ where: { isPremium: true } }),
             this.photoRepository.count(),
             this.photoRepository.count({ where: { moderationStatus: PhotoModerationStatus.PENDING } }),
             this.messageRepository.count(),
@@ -691,6 +836,7 @@ export class AdminService implements OnModuleInit {
             users: {
                 total: totalUsers,
                 active: activeUsers,
+                rejected: rejectedUsers,
                 suspended: suspendedUsers,
                 banned: bannedUsers,
                 pendingVerification,
@@ -725,6 +871,124 @@ export class AdminService implements OnModuleInit {
                     : '0%',
             },
         };
+    }
+
+    private normalizeUserState(user: User): User {
+        return {
+            ...user,
+            verification: normalizeVerificationState(user.verification),
+        };
+    }
+
+    private buildNotificationPayload(
+        type: string,
+        userId: string,
+        conversationId?: string | null,
+        extraData: Record<string, any> = {},
+    ) {
+        return {
+            payload: {
+                type,
+                userId,
+                conversationId: conversationId ?? null,
+                extraData,
+            },
+        };
+    }
+
+    private async updateVerificationState(
+        userId: string,
+        field: 'selfie' | 'marital_status',
+        status: VerificationStatus,
+        adminId: string,
+        rejectionReason?: string,
+    ) {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const verification = normalizeVerificationState(user.verification);
+        const existing = verification[field];
+        const now = new Date().toISOString();
+        const url = existing.url || (field === 'selfie' ? user.selfieUrl : null);
+
+        if (status !== VerificationStatus.NOT_UPLOADED && !url) {
+            throw new BadRequestException(
+                field === 'selfie'
+                    ? 'User has not uploaded a selfie'
+                    : 'User has not uploaded a marital-status document',
+            );
+        }
+
+        verification[field] = {
+            ...existing,
+            status,
+            url: status === VerificationStatus.NOT_UPLOADED ? null : url,
+            submittedAt:
+                status === VerificationStatus.NOT_UPLOADED
+                    ? null
+                    : existing.submittedAt || now,
+            reviewedAt:
+                status === VerificationStatus.PENDING || status === VerificationStatus.NOT_UPLOADED
+                    ? null
+                    : now,
+            reviewedBy:
+                status === VerificationStatus.PENDING || status === VerificationStatus.NOT_UPLOADED
+                    ? null
+                    : adminId,
+            rejectionReason:
+                status === VerificationStatus.REJECTED
+                    ? rejectionReason || 'Verification rejected'
+                    : null,
+        };
+
+        if (field === 'selfie') {
+            (user as any).selfieUrl = verification.selfie.url;
+            user.selfieVerified = status === VerificationStatus.APPROVED;
+        }
+
+        user.verification = verification;
+        const savedUser = await this.userRepository.save(user);
+
+        const redisKey =
+            field === 'selfie'
+                ? `selfie_status:${userId}`
+                : `marriage_cert_status:${userId}`;
+        await this.redisService.set(redisKey, this.mapVerificationStatusToRedis(status), 0);
+
+        await this.notificationsService.createNotification(userId, {
+            type: 'verification',
+            title:
+                field === 'selfie'
+                    ? 'Selfie verification updated'
+                    : 'Marital status verification updated',
+            body:
+                status === VerificationStatus.APPROVED
+                    ? 'Your verification has been approved.'
+                    : status === VerificationStatus.REJECTED
+                        ? rejectionReason || 'Your verification was rejected.'
+                        : 'Your verification is pending review.',
+            data: {
+                verificationType: field,
+                status,
+                rejectionReason: status === VerificationStatus.REJECTED ? rejectionReason || null : null,
+            },
+        });
+
+        return this.normalizeUserState(savedUser);
+    }
+
+    private mapVerificationStatusToRedis(status: VerificationStatus): string {
+        switch (status) {
+            case VerificationStatus.APPROVED:
+                return 'verified';
+            case VerificationStatus.REJECTED:
+                return 'reverify_required';
+            case VerificationStatus.PENDING:
+                return 'pending_review';
+            case VerificationStatus.NOT_UPLOADED:
+            default:
+                return 'not_uploaded';
+        }
     }
 }
 

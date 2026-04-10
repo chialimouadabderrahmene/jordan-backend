@@ -6,6 +6,7 @@ import {
     HttpException,
     HttpStatus,
     Logger,
+    ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -396,22 +397,6 @@ export class AuthService {
             throw new UnauthorizedException('Invalid credentials');
         }
 
-        if (user.status === UserStatus.PENDING_VERIFICATION) {
-            throw new UnauthorizedException('Please verify your email first');
-        }
-
-        if (user.status === UserStatus.BANNED) {
-            throw new UnauthorizedException('Your account has been banned');
-        }
-
-        if (user.status === UserStatus.SUSPENDED) {
-            throw new UnauthorizedException('Your account is suspended');
-        }
-
-        if (user.status !== UserStatus.ACTIVE) {
-            throw new UnauthorizedException('Account is not active');
-        }
-
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
             this.redisService.appendAuditLog({
@@ -423,6 +408,17 @@ export class AuthService {
             }).catch(() => {});
             throw new UnauthorizedException('Invalid credentials');
         }
+
+        if (!user.emailVerified && user.status === UserStatus.PENDING_VERIFICATION) {
+            throw new UnauthorizedException('Please verify your email first');
+        }
+
+        const blockedLoginMessage = this.getBlockedLoginMessage(user.status);
+        if (blockedLoginMessage) {
+            throw new ForbiddenException(blockedLoginMessage);
+        }
+
+        await this.subscriptionsService.syncUserPremiumState(user.id);
 
         const tokens = await this.generateTokens(user);
         await this.updateRefreshToken(user.id, tokens.refreshToken, tokens.familyId);
@@ -461,22 +457,18 @@ export class AuthService {
         });
 
         if (user) {
-            // Existing user - check status
-            if (user.status === UserStatus.BANNED) {
-                throw new UnauthorizedException('Your account has been banned');
-            }
-            if (user.status === UserStatus.SUSPENDED) {
-                throw new UnauthorizedException('Your account is suspended');
-            }
-
-            // If user was pending verification, activate them (Google verifies email)
-            if (user.status === UserStatus.PENDING_VERIFICATION) {
+            if (user.status === UserStatus.PENDING_VERIFICATION && !user.emailVerified) {
                 await this.userRepository.update(user.id, {
                     status: UserStatus.ACTIVE,
                     emailVerified: true,
                 });
                 user.status = UserStatus.ACTIVE;
                 user.emailVerified = true;
+            }
+
+            const blockedLoginMessage = this.getBlockedLoginMessage(user.status);
+            if (blockedLoginMessage) {
+                throw new ForbiddenException(blockedLoginMessage);
             }
 
             this.logger.log(`[GoogleSignIn] Existing user found: ${user.id}`);
@@ -533,6 +525,8 @@ export class AuthService {
                 this.logger.warn(`[GoogleSignIn] Stripe customer creation failed: ${err.message}`);
             }
         }
+
+        await this.subscriptionsService.syncUserPremiumState(user.id);
 
         // Generate tokens
         const tokens = await this.generateTokens(user);
@@ -754,7 +748,7 @@ export class AuthService {
 
         const user = await this.userRepository.findOne({
             where: { id: payload.sub },
-            select: ['id', 'email', 'firstName', 'lastName', 'role', 'refreshToken'],
+            select: ['id', 'email', 'firstName', 'lastName', 'role', 'refreshToken', 'status', 'emailVerified'],
         });
 
         if (!user || !user.refreshToken) {
@@ -782,6 +776,17 @@ export class AuthService {
 
             throw new UnauthorizedException('Session compromised. All sessions have been revoked.');
         }
+
+        if (!user.emailVerified && user.status === UserStatus.PENDING_VERIFICATION) {
+            throw new UnauthorizedException('Please verify your email first');
+        }
+
+        const blockedLoginMessage = this.getBlockedLoginMessage(user.status);
+        if (blockedLoginMessage) {
+            throw new ForbiddenException(blockedLoginMessage);
+        }
+
+        await this.subscriptionsService.syncUserPremiumState(user.id);
 
         // Token family validation (if family tracking is present)
         if (payload.familyId) {
@@ -914,5 +919,23 @@ export class AuthService {
     private sanitizeUser(user: any) {
         const { password, refreshToken, otpCode, otpExpiresAt, otpAttempts, otpCooldownUntil, resetOtpCode, resetOtpExpiresAt, resetOtpAttempts, ...sanitized } = user;
         return sanitized;
+    }
+
+    private getBlockedLoginMessage(status: UserStatus): string | null {
+        switch (status) {
+            case UserStatus.PENDING_VERIFICATION:
+                return 'Your account is under review';
+            case UserStatus.REJECTED:
+                return 'Verification rejected';
+            case UserStatus.BANNED:
+                return 'Your account is banned';
+            case UserStatus.SUSPENDED:
+                return 'Account suspended, contact support';
+            case UserStatus.DEACTIVATED:
+                return 'Account suspended, contact support';
+            case UserStatus.ACTIVE:
+            default:
+                return null;
+        }
     }
 }

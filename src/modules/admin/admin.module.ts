@@ -17,12 +17,18 @@ import { SupportTicket } from '../../database/entities/support-ticket.entity';
 import { Ad } from '../../database/entities/ad.entity';
 import { BlockedUser } from '../../database/entities/blocked-user.entity';
 import { Plan } from '../../database/entities/plan.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([
-        User, Report, Profile, Match, Subscription, Photo, Like, Message,
-        Boost, Notification, Conversation, SupportTicket, Ad, BlockedUser, Plan
-    ])],
+    imports: [
+        TypeOrmModule.forFeature([
+            User, Report, Profile, Match, Subscription, Photo, Like, Message,
+            Boost, Notification, Conversation, SupportTicket, Ad, BlockedUser, Plan,
+        ]),
+        NotificationsModule,
+        SubscriptionsModule,
+    ],
     controllers: [AdminController],
     providers: [AdminService],
 })

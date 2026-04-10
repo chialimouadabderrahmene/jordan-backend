@@ -10,6 +10,7 @@ import {
     SubscriptionPlan,
     SubscriptionStatus,
 } from '../../database/entities/subscription.entity';
+import { User } from '../../database/entities/user.entity';
 import { RedisService } from '../redis/redis.service';
 
 @Injectable()
@@ -17,6 +18,8 @@ export class SubscriptionsService {
     constructor(
         @InjectRepository(Subscription)
         private readonly subscriptionRepository: Repository<Subscription>,
+        @InjectRepository(User)
+        private readonly userRepository: Repository<User>,
         private readonly redisService: RedisService,
     ) { }
 
@@ -44,8 +47,8 @@ export class SubscriptionsService {
         });
 
         const saved = await this.subscriptionRepository.save(subscription);
-        await this.redisService.del(`premium:${userId}`);
-        await this.redisService.del(`plan:${userId}`);
+        await this.updateUserPremiumState(userId, true, now, endDate);
+        await this.invalidatePremiumCaches(userId);
         
         return saved;
     }
@@ -101,7 +104,8 @@ export class SubscriptionsService {
         const saved = await this.subscriptionRepository.save(subscription);
 
         // Invalidate premium cache so swipe limits update immediately
-        await this.redisService.del(`premium:${userId}`);
+        await this.updateUserPremiumState(userId, true, now, endDate);
+        await this.invalidatePremiumCaches(userId);
 
         return saved;
     }
@@ -116,25 +120,13 @@ export class SubscriptionsService {
         await this.subscriptionRepository.save(sub);
 
         // Invalidate premium cache
-        await this.redisService.del(`premium:${userId}`);
+        await this.updateUserPremiumState(userId, false, null, null);
+        await this.invalidatePremiumCaches(userId);
     }
 
     async isPremium(userId: string): Promise<boolean> {
-        const sub = await this.subscriptionRepository.findOne({
-            where: { userId, status: SubscriptionStatus.ACTIVE },
-        });
-        
-        if (!sub || sub.plan === SubscriptionPlan.FREE) return false;
-
-        // Check for expiry
-        if (sub.endDate && new Date() > sub.endDate) {
-            // Silently mark as expired if we caught it here
-            await this.subscriptionRepository.update(sub.id, { status: SubscriptionStatus.EXPIRED });
-            await this.redisService.del(`premium:${userId}`);
-            return false;
-        }
-
-        return true;
+        const state = await this.syncUserPremiumState(userId);
+        return state.isPremium;
     }
 
     async getPlanFeatures(plan: SubscriptionPlan) {
@@ -165,5 +157,190 @@ export class SubscriptionsService {
             },
         };
         return features[plan];
+    }
+
+    async setManualPremium(
+        userId: string,
+        startDate: Date,
+        expiryDate: Date,
+        paymentReference: string = 'ADMIN_OVERRIDE',
+    ): Promise<Subscription> {
+        if (expiryDate <= startDate) {
+            throw new BadRequestException('expiryDate must be later than startDate');
+        }
+
+        await this.subscriptionRepository.update(
+            { userId, status: SubscriptionStatus.ACTIVE },
+            { status: SubscriptionStatus.CANCELLED },
+        );
+
+        const subscription = this.subscriptionRepository.create({
+            userId,
+            plan: SubscriptionPlan.PREMIUM,
+            status: SubscriptionStatus.ACTIVE,
+            startDate,
+            endDate: expiryDate,
+            paymentReference,
+        });
+
+        const saved = await this.subscriptionRepository.save(subscription);
+        const now = new Date();
+        await this.updateUserPremiumState(
+            userId,
+            startDate <= now && expiryDate > now,
+            startDate,
+            expiryDate,
+        );
+        await this.invalidatePremiumCaches(userId);
+
+        return saved;
+    }
+
+    async removePremium(userId: string): Promise<void> {
+        await this.subscriptionRepository.update(
+            { userId, status: SubscriptionStatus.ACTIVE },
+            { status: SubscriptionStatus.CANCELLED },
+        );
+
+        await this.updateUserPremiumState(userId, false, null, null);
+        await this.invalidatePremiumCaches(userId);
+    }
+
+    async expirePremiums(now: Date = new Date()): Promise<string[]> {
+        const expiredSubscriptions = await this.subscriptionRepository.find({
+            where: { status: SubscriptionStatus.ACTIVE },
+            select: ['id', 'userId', 'endDate', 'plan'],
+        });
+
+        const expiredUserIds = new Set<string>();
+
+        for (const subscription of expiredSubscriptions) {
+            if (
+                subscription.plan !== SubscriptionPlan.FREE &&
+                subscription.endDate &&
+                new Date(subscription.endDate) <= now
+            ) {
+                await this.subscriptionRepository.update(subscription.id, {
+                    status: SubscriptionStatus.EXPIRED,
+                });
+                expiredUserIds.add(subscription.userId);
+            }
+        }
+
+        const expiredUsers = await this.userRepository.find({
+            where: { isPremium: true },
+            select: ['id', 'premiumExpiryDate'],
+        });
+
+        for (const user of expiredUsers) {
+            if (user.premiumExpiryDate && new Date(user.premiumExpiryDate) <= now) {
+                expiredUserIds.add(user.id);
+            }
+        }
+
+        if (expiredUserIds.size === 0) {
+            return [];
+        }
+
+        const ids = [...expiredUserIds];
+        await this.userRepository
+            .createQueryBuilder()
+            .update(User)
+            .set({
+                isPremium: false,
+                premiumStartDate: null,
+                premiumExpiryDate: null,
+            })
+            .where('id IN (:...ids)', { ids })
+            .execute();
+
+        await Promise.all(ids.map((userId) => this.invalidatePremiumCaches(userId)));
+
+        return ids;
+    }
+
+    async syncUserPremiumState(
+        userId: string,
+    ): Promise<{ isPremium: boolean; premiumStartDate: Date | null; premiumExpiryDate: Date | null }> {
+        const activeSubscription = await this.subscriptionRepository.findOne({
+            where: { userId, status: SubscriptionStatus.ACTIVE },
+            order: { endDate: 'DESC', createdAt: 'DESC' },
+        });
+
+        const now = new Date();
+
+        if (
+            activeSubscription &&
+            activeSubscription.plan !== SubscriptionPlan.FREE &&
+            (!activeSubscription.startDate || new Date(activeSubscription.startDate) <= now) &&
+            (!activeSubscription.endDate || new Date(activeSubscription.endDate) > now)
+        ) {
+            const startDate = activeSubscription.startDate ? new Date(activeSubscription.startDate) : now;
+            const expiryDate = activeSubscription.endDate ? new Date(activeSubscription.endDate) : null;
+
+            await this.updateUserPremiumState(userId, true, startDate, expiryDate);
+            await this.invalidatePremiumCaches(userId);
+
+            return {
+                isPremium: true,
+                premiumStartDate: startDate,
+                premiumExpiryDate: expiryDate,
+            };
+        }
+
+        if (
+            activeSubscription &&
+            activeSubscription.plan !== SubscriptionPlan.FREE &&
+            activeSubscription.startDate &&
+            new Date(activeSubscription.startDate) > now
+        ) {
+            const startDate = new Date(activeSubscription.startDate);
+            const expiryDate = activeSubscription.endDate ? new Date(activeSubscription.endDate) : null;
+
+            await this.updateUserPremiumState(userId, false, startDate, expiryDate);
+            await this.invalidatePremiumCaches(userId);
+
+            return {
+                isPremium: false,
+                premiumStartDate: startDate,
+                premiumExpiryDate: expiryDate,
+            };
+        }
+
+        if (activeSubscription?.endDate && new Date(activeSubscription.endDate) <= now) {
+            await this.subscriptionRepository.update(activeSubscription.id, {
+                status: SubscriptionStatus.EXPIRED,
+            });
+        }
+
+        await this.updateUserPremiumState(userId, false, null, null);
+        await this.invalidatePremiumCaches(userId);
+
+        return {
+            isPremium: false,
+            premiumStartDate: null,
+            premiumExpiryDate: null,
+        };
+    }
+
+    private async updateUserPremiumState(
+        userId: string,
+        isPremium: boolean,
+        premiumStartDate: Date | null,
+        premiumExpiryDate: Date | null,
+    ): Promise<void> {
+        await this.userRepository.update(userId, {
+            isPremium,
+            premiumStartDate,
+            premiumExpiryDate,
+        });
+    }
+
+    private async invalidatePremiumCaches(userId: string): Promise<void> {
+        await Promise.all([
+            this.redisService.del(`premium:${userId}`),
+            this.redisService.del(`plan:${userId}`),
+            this.redisService.del(`features:${userId}`),
+        ]);
     }
 }
